@@ -27,6 +27,9 @@
 namespace Slic3r {
 namespace Plugin {
 
+// Use wxGetApp from the GUI namespace
+using GUI::wxGetApp;
+
 //==============================================================================
 // PluginProgressCallback Implementation
 //==============================================================================
@@ -253,8 +256,7 @@ bool PluginContextImpl::set_mesh(int object_idx, int volume_idx, const MeshData&
         vol->set_mesh(std::move(mesh));
         vol->calculate_convex_hull();
         
-        // Mark object as modified
-        wxGetApp().obj_list()->update_name_in_model(vol->get_object());
+        // Update the plater to reflect changes
         wxGetApp().plater()->update();
     });
     
@@ -568,13 +570,13 @@ std::string PluginContextImpl::save_file_dialog(const std::string& title,
 std::string PluginContextImpl::get_plugin_data_dir() const
 {
     // Create plugin-specific data directory
-    boost::filesystem::path data_dir = boost::filesystem::path(data_dir_path()) / "plugins" / m_plugin_id;
+    boost::filesystem::path data_path = boost::filesystem::path(data_dir()) / "plugins" / m_plugin_id;
     
-    if (!boost::filesystem::exists(data_dir)) {
-        boost::filesystem::create_directories(data_dir);
+    if (!boost::filesystem::exists(data_path)) {
+        boost::filesystem::create_directories(data_path);
     }
     
-    return data_dir.string();
+    return data_path.string();
 }
 
 std::string PluginContextImpl::get_resources_dir() const

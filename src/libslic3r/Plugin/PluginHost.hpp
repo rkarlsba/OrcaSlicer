@@ -87,6 +87,9 @@ public:
     PluginHost(const PluginHost&) = delete;
     PluginHost& operator=(const PluginHost&) = delete;
     
+    // Singleton access (created on first use)
+    static PluginHost* instance();
+    
     //--------------------------------------------------------------------------
     // Initialization
     //--------------------------------------------------------------------------

@@ -12,10 +12,30 @@
 #include <boost/process/search_path.hpp>
 #include <boost/filesystem.hpp>
 #include <boost/algorithm/string.hpp>
+#include <boost/beast/core/detail/base64.hpp>
 #include <nlohmann/json.hpp>
 
 #include <fstream>
 #include <sstream>
+
+namespace {
+// Base64 encoding helper
+std::string base64_encode(const std::vector<uint8_t>& data) {
+    std::string result;
+    result.resize(boost::beast::detail::base64::encoded_size(data.size()));
+    result.resize(boost::beast::detail::base64::encode(result.data(), data.data(), data.size()));
+    return result;
+}
+
+// Base64 decoding helper
+std::vector<uint8_t> base64_decode(const std::string& encoded) {
+    std::vector<uint8_t> result;
+    result.resize(boost::beast::detail::base64::decoded_size(encoded.size()));
+    auto decode_result = boost::beast::detail::base64::decode(result.data(), encoded.data(), encoded.size());
+    result.resize(decode_result.first);
+    return result;
+}
+} // anonymous namespace
 
 #ifdef _WIN32
 #include <windows.h>
@@ -633,7 +653,7 @@ fs::path NodePluginRuntime::find_node_executable()
         auto result = bp::search_path("node");
 #endif
         if (!result.empty()) {
-            return result;
+            return fs::path(result.string());
         }
     } catch (...) {
     }

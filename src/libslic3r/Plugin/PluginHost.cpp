@@ -36,6 +36,10 @@ PluginHost& plugin_host() {
     return *s_plugin_host;
 }
 
+PluginHost* PluginHost::instance() {
+    return &plugin_host();
+}
+
 //==============================================================================
 // PluginHost Implementation
 //==============================================================================
@@ -693,6 +697,56 @@ bool PluginHost::check_dependencies(const std::string& plugin_id) const {
             return false;
         }
     }
+    return true;
+}
+
+//------------------------------------------------------------------------------
+// Missing implementations
+//------------------------------------------------------------------------------
+
+std::unique_ptr<PluginContext> PluginHost::create_context(const std::string& plugin_id) {
+    // Create plugin context using the factory function from PluginContext.cpp
+    return create_plugin_context(plugin_id, this, m_plater, m_worker);
+}
+
+bool PluginHost::uninstall_plugin(const std::string& plugin_id) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    
+    auto it = m_plugins.find(plugin_id);
+    if (it == m_plugins.end()) {
+        BOOST_LOG_TRIVIAL(warning) << "Plugin: Cannot uninstall unknown plugin " << plugin_id;
+        return false;
+    }
+    
+    // Unload first if loaded
+    if (it->second.state == PluginState::Loaded) {
+        unload_plugin(plugin_id);
+    }
+    
+    // Get install path
+    std::filesystem::path install_path = it->second.install_path;
+    
+    // Try to remove from registry
+    m_plugins.erase(it);
+    
+    // Try to remove files (only if in user plugins directory)
+    auto user_dir = get_user_plugins_dir();
+    if (install_path.string().find(user_dir.string()) == 0) {
+        try {
+            std::filesystem::remove_all(install_path);
+            BOOST_LOG_TRIVIAL(info) << "Plugin: Uninstalled " << plugin_id;
+        } catch (const std::exception& e) {
+            BOOST_LOG_TRIVIAL(error) << "Plugin: Failed to remove plugin files: " << e.what();
+            // Still consider uninstall successful as we removed from registry
+        }
+    } else {
+        BOOST_LOG_TRIVIAL(info) << "Plugin: Unregistered " << plugin_id << " (system plugin, files not removed)";
+    }
+    
+    // Remove from configs
+    m_configs.erase(plugin_id);
+    save_configs();
+    
     return true;
 }
 

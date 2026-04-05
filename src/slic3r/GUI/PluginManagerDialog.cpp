@@ -15,6 +15,7 @@
 
 #include "libslic3r/Plugin/PluginHost.hpp"
 #include "libslic3r/Plugin/PluginAPI.hpp"
+#include "libslic3r/Plugin/NodePluginRuntime.hpp"
 #include "libslic3r/Utils.hpp"
 
 #include <wx/sizer.h>
@@ -27,6 +28,7 @@
 
 #include <boost/filesystem.hpp>
 #include <boost/algorithm/string.hpp>
+#include <algorithm>
 
 namespace Slic3r {
 namespace GUI {
@@ -67,7 +69,7 @@ PluginListItem::PluginListItem(wxWindow* parent,
     // Left side - checkbox for enable/disable
     auto* left_sizer = new wxBoxSizer(wxVERTICAL);
     m_enable_checkbox = new ::CheckBox(this);
-    m_enable_checkbox->SetValue(info.enabled);
+    m_enable_checkbox->SetValue(info.user_enabled);
     m_enable_checkbox->Bind(wxEVT_TOGGLEBUTTON, &PluginListItem::on_enable_toggle, this);
     left_sizer->Add(m_enable_checkbox, 0, wxALIGN_CENTER | wxALL, FromDIP(10));
     main_sizer->Add(left_sizer, 0, wxALIGN_CENTER_VERTICAL);
@@ -364,7 +366,7 @@ void PluginManagerDialog::refresh_plugins()
     if (!m_plugin_host) return;
     
     // Refresh from host
-    m_plugin_host->discover_plugins();
+    m_plugin_host->scan_plugin_directories();
     
     populate_installed_list();
     populate_available_list();
@@ -397,7 +399,7 @@ void PluginManagerDialog::populate_installed_list()
         empty_label->SetForegroundColour(wxColour(150, 150, 150));
         m_installed_sizer->Add(empty_label, 0, wxALL | wxALIGN_CENTER, FromDIP(20));
     } else {
-        for (const auto& [id, info] : plugins) {
+        for (const auto& info : plugins) {
             auto* item = new PluginListItem(m_installed_panel, info,
                 [this](const std::string& id, bool enabled) { on_plugin_enable_change(id, enabled); },
                 [this](const std::string& id) { on_plugin_settings(id); },
@@ -447,19 +449,18 @@ void PluginManagerDialog::on_plugin_enable_change(const std::string& plugin_id, 
 {
     if (!m_plugin_host) return;
     
-    if (enabled) {
-        m_plugin_host->enable_plugin(plugin_id);
-    } else {
-        m_plugin_host->disable_plugin(plugin_id);
-    }
+    m_plugin_host->set_plugin_enabled(plugin_id, enabled);
     
     // Update UI
     for (auto* item : m_plugin_items) {
         if (item->plugin_id() == plugin_id) {
             const auto& plugins = m_plugin_host->get_plugins();
-            auto it = plugins.find(plugin_id);
+            auto it = std::find_if(plugins.begin(), plugins.end(), 
+                [&plugin_id](const Plugin::PluginInfo& info) { 
+                    return info.manifest.id == plugin_id; 
+                });
             if (it != plugins.end()) {
-                item->update_state(it->second.enabled, it->second.state == Plugin::PluginState::Error);
+                item->update_state(it->user_enabled, it->state == Plugin::PluginState::Error);
             }
             break;
         }
@@ -506,9 +507,13 @@ void PluginManagerDialog::on_refresh_timer(wxTimerEvent& event)
     for (auto* item : m_plugin_items) {
         if (m_plugin_host) {
             const auto& plugins = m_plugin_host->get_plugins();
-            auto it = plugins.find(item->plugin_id());
+            auto plugin_id = item->plugin_id();
+            auto it = std::find_if(plugins.begin(), plugins.end(),
+                [&plugin_id](const Plugin::PluginInfo& info) {
+                    return info.manifest.id == plugin_id;
+                });
             if (it != plugins.end()) {
-                item->update_state(it->second.enabled, it->second.state == Plugin::PluginState::Error);
+                item->update_state(it->user_enabled, it->state == Plugin::PluginState::Error);
             }
         }
     }

@@ -477,7 +477,7 @@ set(lisbslic3r_sources
     Plugin/PluginHost.hpp
     Plugin/PluginHost.cpp
     Plugin/PluginContext.hpp
-    Plugin/PluginContext.cpp
+    # Note: PluginContext.cpp is built in slic3r/CMakeLists.txt (needs wxWidgets)
     Plugin/PluginIPC.hpp
     Plugin/NodePluginRuntime.hpp
     Plugin/NodePluginRuntime.cpp

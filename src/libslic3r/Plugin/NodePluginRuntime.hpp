@@ -103,6 +103,11 @@ private:
     // IPC event handling
     void handle_ipc_message(const IPCMessage& msg);
     
+    // Handle host API requests from plugins
+    JsonValue handle_host_request(const std::string& plugin_id,
+                                  const std::string& method,
+                                  const JsonValue& params);
+    
     //--------------------------------------------------------------------------
     // Member Variables
     //--------------------------------------------------------------------------
