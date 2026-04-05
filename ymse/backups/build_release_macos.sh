@@ -1,5 +1,4 @@
 #!/bin/bash
-# vim:ts=4:sw=4:sts=4:et:si:ai:fdm=marker
 
 set -e
 set -o pipefail
@@ -147,15 +146,6 @@ function build_deps() {
         # if ARCH is universal or equal to _ARCH
         if [ "$ARCH" == "universal" ] || [ "$ARCH" == "$_ARCH" ]; then
 
-            # Force Homebrew wxWidgets 3.3.x
-            export WX_CONFIG=/opt/homebrew/bin/wx-config
-            export WX_CXXFLAGS="$($WX_CONFIG --cxxflags)"
-            export WX_LIBS="$($WX_CONFIG --libs)"
-
-            echo "Using wxWidgets from: $WX_CONFIG"
-            echo "WX CXXFLAGS: $WX_CXXFLAGS"
-            echo "WX LIBS: $WX_LIBS"
-
             PROJECT_BUILD_DIR="$PROJECT_DIR/build/$_ARCH"
             DEPS_BUILD_DIR="$DEPS_DIR/build/$_ARCH"
             DEPS="$DEPS_BUILD_DIR/OrcaSlicer_dep"
@@ -172,10 +162,9 @@ function build_deps() {
                         -DCMAKE_OSX_ARCHITECTURES:STRING="${_ARCH}" \
                         -DCMAKE_OSX_DEPLOYMENT_TARGET="${OSX_DEPLOYMENT_TARGET}" \
                         -DCMAKE_IGNORE_PREFIX_PATH="${CMAKE_IGNORE_PREFIX_PATH}" \
-                        -DwxWidgets_CONFIG_EXECUTABLE=$WX_CONFIG \
-                        -DwxWidgets_ROOT_DIR=/opt/homebrew \
-                        -DCMAKE_CXX_FLAGS="${WX_CXXFLAGS}" \
-                        -DCMAKE_EXE_LINKER_FLAGS="${WX_LIBS}" \
+			-DwxWidgets_CONFIG_EXECUTABLE=${WX_CONFIG} \
+			-DCMAKE_CXX_FLAGS="$(${WX_CONFIG} --cxxflags)" \
+			-DCMAKE_EXE_LINKER_FLAGS="$(${WX_CONFIG} --libs)" \
                         ${CMAKE_POLICY_COMPAT}
                 fi
                 cmake --build . --config "$BUILD_CONFIG" --target deps
@@ -218,10 +207,6 @@ function build_slicer() {
                     -DCMAKE_OSX_ARCHITECTURES="${_ARCH}" \
                     -DCMAKE_OSX_DEPLOYMENT_TARGET="${OSX_DEPLOYMENT_TARGET}" \
                     -DCMAKE_IGNORE_PREFIX_PATH="${CMAKE_IGNORE_PREFIX_PATH}" \
-                    -DwxWidgets_CONFIG_EXECUTABLE=$WX_CONFIG \
-                    -DwxWidgets_ROOT_DIR=/opt/homebrew \
-                    -DCMAKE_CXX_FLAGS="${WX_CXXFLAGS}" \
-                    -DCMAKE_EXE_LINKER_FLAGS="${WX_LIBS}" \
                     ${CMAKE_POLICY_COMPAT}
             fi
             cmake --build . --config "$BUILD_CONFIG" --target "$SLICER_BUILD_TARGET"

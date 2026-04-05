@@ -1,0 +1,28 @@
+--- a/build_release_macos.sh
++++ b/build_release_macos.sh
+@@ -230,6 +230,17 @@ function build_slicer() {
+     for _ARCH in x86_64 arm64; do
+         if [ "$ARCH" == "universal" ] || [ "$ARCH" == "$_ARCH" ]; then
+
++            # Force Homebrew wxWidgets 3.3.x
++            export WX_CONFIG=/opt/homebrew/bin/wx-config
++            export WX_CXXFLAGS="$($WX_CONFIG --cxxflags)"
++            export WX_LIBS="$($WX_CONFIG --libs)"
++
++            echo "Using wxWidgets from: $WX_CONFIG"
++            echo "WX CXXFLAGS: $WX_CXXFLAGS"
++            echo "WX LIBS: $WX_LIBS"
++
+             PROJECT_BUILD_DIR="$PROJECT_DIR/build/$_ARCH"
+             DEPS_BUILD_DIR="$DEPS_DIR/build/$_ARCH"
+             DEPS="$DEPS_BUILD_DIR/OrcaSlicer_dep"
+@@ -255,6 +266,9 @@ function build_slicer() {
+             if [ "1." != "$BUILD_ONLY". ]; then
+                 cmake "${PROJECT_DIR}" \
+                     -G "${SLICER_CMAKE_GENERATOR}" \
++                    -DwxWidgets_CONFIG_EXECUTABLE=$WX_CONFIG \
++                    -DCMAKE_CXX_FLAGS="${WX_CXXFLAGS}" \
++                    -DCMAKE_EXE_LINKER_FLAGS="${WX_LIBS}" \
+                     -DORCA_TOOLS=ON \
+                     ${ORCA_UPDATER_SIG_KEY:+-DORCA_UPDATER_SIG_KEY="$ORCA_UPDATER_SIG_KEY"} \
+                     ${BUILD_TESTS:+-DBUILD_TESTS=ON} \

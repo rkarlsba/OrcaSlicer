@@ -473,6 +473,16 @@ set(lisbslic3r_sources
     GCode/ToolOrderUtils.cpp
     FlushVolPredictor.hpp
     FlushVolPredictor.cpp
+    Plugin/PluginAPI.hpp
+    Plugin/PluginHost.hpp
+    Plugin/PluginHost.cpp
+    Plugin/PluginContext.hpp
+    Plugin/PluginContext.cpp
+    Plugin/PluginIPC.hpp
+    Plugin/NodePluginRuntime.hpp
+    Plugin/NodePluginRuntime.cpp
+    Plugin/NativePluginRuntime.hpp
+    Plugin/PythonPluginRuntime.hpp
 )
 
 if (APPLE)

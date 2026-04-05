@@ -1,0 +1,91 @@
+{
+  "name": "@orcaslicer/bumpmesh",
+  "version": "1.0.0",
+  "description": "Apply texture displacement to 3D meshes - based on CNC Kitchen's BumpMesh",
+  "author": "CNC Kitchen / OrcaSlicer Contributors",
+  "license": "MIT",
+  "main": "index.js",
+  "orcaPlugin": {
+    "displayName": "BumpMesh",
+    "capabilities": [
+      "meshModification",
+      "textureMaterial"
+    ],
+    "icon": "icon.png",
+    "configSchema": {
+      "type": "object",
+      "properties": {
+        "mappingMode": {
+          "type": "string",
+          "enum": ["triplanar", "cubic", "cylindrical", "spherical", "planarXY", "planarXZ", "planarYZ"],
+          "default": "triplanar",
+          "title": "Projection Mode"
+        },
+        "scaleU": {
+          "type": "number",
+          "default": 1.0,
+          "minimum": 0.05,
+          "maximum": 10.0,
+          "title": "Scale U"
+        },
+        "scaleV": {
+          "type": "number",
+          "default": 1.0,
+          "minimum": 0.05,
+          "maximum": 10.0,
+          "title": "Scale V"
+        },
+        "offsetU": {
+          "type": "number",
+          "default": 0.0,
+          "title": "Offset U"
+        },
+        "offsetV": {
+          "type": "number",
+          "default": 0.0,
+          "title": "Offset V"
+        },
+        "rotation": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "maximum": 360,
+          "title": "Rotation (degrees)"
+        },
+        "amplitude": {
+          "type": "number",
+          "default": 1.0,
+          "minimum": 0.0,
+          "maximum": 10.0,
+          "title": "Amplitude (mm)"
+        },
+        "symmetricDisplacement": {
+          "type": "boolean",
+          "default": true,
+          "title": "Symmetric Displacement"
+        },
+        "maxEdgeLength": {
+          "type": "number",
+          "default": 0.5,
+          "minimum": 0.1,
+          "maximum": 5.0,
+          "title": "Max Edge Length (mm)"
+        },
+        "targetTriangles": {
+          "type": "integer",
+          "default": 250000,
+          "minimum": 10000,
+          "maximum": 2000000,
+          "title": "Target Triangle Count"
+        }
+      }
+    }
+  },
+  "keywords": [
+    "orcaslicer",
+    "plugin",
+    "texture",
+    "displacement",
+    "bumpmesh"
+  ]
+}

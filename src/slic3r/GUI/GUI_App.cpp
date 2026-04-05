@@ -89,6 +89,7 @@
 #include "../Utils/UndoRedo.hpp"
 #include "slic3r/Config/Snapshot.hpp"
 #include "Preferences.hpp"
+#include "PluginManagerDialog.hpp"
 #include "Tab.hpp"
 #include "SysInfoDialog.hpp"
 #include "UpdateDialogs.hpp"
@@ -6858,6 +6859,12 @@ void GUI_App::open_preferences(size_t open_on_tab, const std::string& highlight_
 
     if (need_recreate_gui)
         recreate_GUI(_L("Changing application language"));
+}
+
+void GUI_App::open_plugin_manager()
+{
+    PluginManagerDialog dlg(mainframe);
+    dlg.ShowModal();
 }
 
 bool GUI_App::has_unsaved_preset_changes() const
