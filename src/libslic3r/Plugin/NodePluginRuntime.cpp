@@ -958,6 +958,13 @@ void NodePluginRuntime::handle_plugin_notification(const std::string& plugin_id,
             return;
         }
         
+        if (method == "ready") {
+            // The node host sends this after all plugins have been loaded
+            std::string version = params["version"].as_string();
+            BOOST_LOG_TRIVIAL(info) << "Plugin runtime ready (" << plugin_id << "), node " << version;
+            return;
+        }
+        
         BOOST_LOG_TRIVIAL(warning) << "Unknown notification from plugin " << plugin_id 
                                    << ": " << method;
                                    

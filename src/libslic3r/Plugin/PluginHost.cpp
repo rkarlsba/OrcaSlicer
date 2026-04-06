@@ -832,6 +832,7 @@ bool PluginHost::register_plugin_submenu(const std::string& plugin_id, const Sub
     
     // Add new submenu
     reg.submenus.push_back(submenu);
+    fprintf(stderr, "[Plugin] %s registered submenu: %s\n", plugin_id.c_str(), submenu.label.c_str());
     BOOST_LOG_TRIVIAL(debug) << "Plugin " << plugin_id << " registered submenu: " << submenu.label;
     
     if (m_menu_changed_callback) m_menu_changed_callback();
@@ -879,6 +880,8 @@ bool PluginHost::register_plugin_menu_item(const std::string& plugin_id, const M
     
     // Add new item
     reg.items.push_back(item);
+    fprintf(stderr, "[Plugin] %s registered menu item: %s (submenu: %s)\n",
+            plugin_id.c_str(), item.label.c_str(), item.submenu_id.c_str());
     BOOST_LOG_TRIVIAL(debug) << "Plugin " << plugin_id << " registered menu item: " << item.label;
     
     if (m_menu_changed_callback) m_menu_changed_callback();
