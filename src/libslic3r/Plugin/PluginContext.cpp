@@ -591,6 +591,46 @@ void PluginContextImpl::run_on_ui_thread(std::function<void()> fn)
     wxGetApp().CallAfter(fn);
 }
 
+//------------------------------------------------------------------------------
+// Menu Operations
+//------------------------------------------------------------------------------
+
+bool PluginContextImpl::register_submenu(const SubmenuInfo& submenu)
+{
+    if (!m_host) return false;
+    return m_host->register_plugin_submenu(m_plugin_id, submenu);
+}
+
+bool PluginContextImpl::unregister_submenu(const std::string& submenu_id)
+{
+    if (!m_host) return false;
+    return m_host->unregister_plugin_submenu(m_plugin_id, submenu_id);
+}
+
+bool PluginContextImpl::register_menu_item(const MenuItemInfo& item)
+{
+    if (!m_host) return false;
+    return m_host->register_plugin_menu_item(m_plugin_id, item);
+}
+
+bool PluginContextImpl::unregister_menu_item(const std::string& item_id)
+{
+    if (!m_host) return false;
+    return m_host->unregister_plugin_menu_item(m_plugin_id, item_id);
+}
+
+bool PluginContextImpl::update_menu_item(const std::string& item_id, const MenuItemInfo& item)
+{
+    if (!m_host) return false;
+    return m_host->update_plugin_menu_item(m_plugin_id, item_id, item);
+}
+
+std::vector<MenuItemInfo> PluginContextImpl::get_registered_menu_items() const
+{
+    if (!m_host) return {};
+    return m_host->get_plugin_menu_items(m_plugin_id);
+}
+
 //==============================================================================
 // Factory Function
 //==============================================================================

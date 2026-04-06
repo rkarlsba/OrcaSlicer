@@ -108,6 +108,17 @@ public:
     std::string get_resources_dir() const override;
     void run_on_ui_thread(std::function<void()> fn) override;
     
+    //--------------------------------------------------------------------------
+    // Menu Operations
+    //--------------------------------------------------------------------------
+    
+    bool register_submenu(const SubmenuInfo& submenu) override;
+    bool unregister_submenu(const std::string& submenu_id) override;
+    bool register_menu_item(const MenuItemInfo& item) override;
+    bool unregister_menu_item(const std::string& item_id) override;
+    bool update_menu_item(const std::string& item_id, const MenuItemInfo& item) override;
+    std::vector<MenuItemInfo> get_registered_menu_items() const override;
+    
 private:
     // Helper to get Model from Plater
     Model* get_model() const;

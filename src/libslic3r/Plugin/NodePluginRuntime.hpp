@@ -50,6 +50,9 @@ public:
                      const MeshView& mesh,
                      const std::string& path) override;
     
+    // Menu hook
+    void on_menu_click(PluginContext* ctx, const MenuEvent& event) override;
+    
 private:
     PluginManifest m_manifest;
     std::shared_ptr<IPCClient> m_ipc;
@@ -81,6 +84,9 @@ public:
     std::string name() const override { return "Node.js"; }
     std::string version() const override { return m_node_version; }
     
+    // Set path to the node-host/index.js script
+    void set_host_script_path(const std::filesystem::path& path) { m_host_script_path = path; }
+    
     // Get Node.js executable path
     static std::filesystem::path find_node_executable();
     
@@ -107,6 +113,11 @@ private:
     JsonValue handle_host_request(const std::string& plugin_id,
                                   const std::string& method,
                                   const JsonValue& params);
+    
+    // Handle notifications from plugins (log, progress, showNotification, etc.)
+    void handle_plugin_notification(const std::string& plugin_id,
+                                    const std::string& method,
+                                    const JsonValue& params);
     
     //--------------------------------------------------------------------------
     // Member Variables

@@ -328,6 +328,26 @@ bool NodePluginInstance::export_mesh(PluginContext* ctx,
     return false;
 }
 
+void NodePluginInstance::on_menu_click(PluginContext* ctx, const MenuEvent& event)
+{
+    if (!m_ipc || !m_ipc->is_connected()) return;
+    
+    try {
+        json params;
+        params["pluginId"] = m_manifest.id;
+        params["itemId"] = event.item_id;
+        params["callbackData"] = event.callback_data;
+        params["isChecked"] = event.is_checked;
+        
+        // Call the plugin's menuClick handler
+        auto result = m_ipc->call("menuClick", JsonValue(params.dump()), 30000);
+        
+        // Result is ignored - menu clicks are typically fire-and-forget
+    } catch (const std::exception& e) {
+        BOOST_LOG_TRIVIAL(error) << "Plugin menu click failed: " << e.what();
+    }
+}
+
 void NodePluginInstance::handle_plugin_request(const IPCMessage& msg)
 {
     if (!m_current_ctx) return;
@@ -557,6 +577,11 @@ std::shared_ptr<IPlugin> NodePluginRuntime::load_plugin(const PluginManifest& ma
             return handle_host_request(manifest.id, method, params);
         });
         
+        // Set up notification handler for fire-and-forget messages from plugin
+        client->set_notification_handler([this, &manifest](const std::string& method, const JsonValue& params) {
+            handle_plugin_notification(manifest.id, method, params);
+        });
+        
         client->start();
         
         // Create plugin instance
@@ -751,7 +776,7 @@ JsonValue NodePluginRuntime::handle_host_request(const std::string& plugin_id,
                                                   const JsonValue& params)
 {
     // Handle requests from plugin to host
-    // This is called when a plugin calls sdk.getMesh(), etc.
+    // This is called when a plugin calls sdk.getMesh(), sdk.registerMenuItem(), etc.
     
     // Find the plugin's context and forward the request
     auto it = m_plugins.find(plugin_id);
@@ -759,9 +784,149 @@ JsonValue NodePluginRuntime::handle_host_request(const std::string& plugin_id,
         return JsonValue(JsonObject{{"error", JsonValue("Plugin not found")}});
     }
     
-    // The actual implementation would forward to PluginContext
-    // For now, return a placeholder
-    return JsonValue(JsonObject{{"error", JsonValue("Not implemented")}});
+    auto& host = Plugin::plugin_host();
+    
+    try {
+        //----------------------------------------------------------------------
+        // Menu Operations
+        //----------------------------------------------------------------------
+        
+        if (method == "registerSubmenu") {
+            const auto& submenu_obj = params["submenu"];
+            SubmenuInfo submenu;
+            submenu.id = submenu_obj["id"].as_string();
+            submenu.label = submenu_obj["label"].as_string();
+            submenu.icon_path = submenu_obj["iconPath"].as_string();
+            submenu.order = static_cast<int>(submenu_obj["order"].as_int());
+            
+            bool ok = host.register_plugin_submenu(plugin_id, submenu);
+            return JsonValue(ok);
+        }
+        
+        if (method == "unregisterSubmenu") {
+            auto submenu_id = params["submenuId"].as_string();
+            bool ok = host.unregister_plugin_submenu(plugin_id, submenu_id);
+            return JsonValue(ok);
+        }
+        
+        if (method == "registerMenuItem") {
+            const auto& item_obj = params["item"];
+            MenuItemInfo item;
+            item.id = item_obj["id"].as_string();
+            item.label = item_obj["label"].as_string();
+            item.tooltip = item_obj["tooltip"].as_string();
+            item.icon_path = item_obj["iconPath"].as_string();
+            item.submenu_id = item_obj["submenuId"].as_string();
+            item.shortcut = item_obj["shortcut"].as_string();
+            item.flags = static_cast<MenuItemFlags>(static_cast<uint32_t>(item_obj["flags"].as_int()));
+            item.order = static_cast<int>(item_obj["order"].as_int());
+            item.callback_data = item_obj["callbackData"].as_string();
+            
+            bool ok = host.register_plugin_menu_item(plugin_id, item);
+            return JsonValue(ok);
+        }
+        
+        if (method == "unregisterMenuItem") {
+            auto item_id = params["itemId"].as_string();
+            bool ok = host.unregister_plugin_menu_item(plugin_id, item_id);
+            return JsonValue(ok);
+        }
+        
+        if (method == "updateMenuItem") {
+            auto item_id = params["itemId"].as_string();
+            const auto& item_obj = params["item"];
+            MenuItemInfo item;
+            item.id = item_id;
+            item.label = item_obj["label"].as_string();
+            item.tooltip = item_obj["tooltip"].as_string();
+            item.icon_path = item_obj["iconPath"].as_string();
+            item.submenu_id = item_obj["submenuId"].as_string();
+            item.shortcut = item_obj["shortcut"].as_string();
+            item.flags = static_cast<MenuItemFlags>(static_cast<uint32_t>(item_obj["flags"].as_int()));
+            item.order = static_cast<int>(item_obj["order"].as_int());
+            item.callback_data = item_obj["callbackData"].as_string();
+            
+            bool ok = host.update_plugin_menu_item(plugin_id, item_id, item);
+            return JsonValue(ok);
+        }
+        
+        if (method == "getRegisteredMenuItems") {
+            auto items = host.get_plugin_menu_items(plugin_id);
+            JsonArray result;
+            for (const auto& item : items) {
+                JsonObject obj;
+                obj["id"] = JsonValue(item.id);
+                obj["label"] = JsonValue(item.label);
+                obj["tooltip"] = JsonValue(item.tooltip);
+                obj["iconPath"] = JsonValue(item.icon_path);
+                obj["submenuId"] = JsonValue(item.submenu_id);
+                obj["shortcut"] = JsonValue(item.shortcut);
+                obj["flags"] = JsonValue(static_cast<double>(static_cast<uint32_t>(item.flags)));
+                obj["order"] = JsonValue(static_cast<double>(item.order));
+                obj["callbackData"] = JsonValue(item.callback_data);
+                result.push_back(JsonValue(obj));
+            }
+            return JsonValue(result);
+        }
+        
+        //----------------------------------------------------------------------
+        // Other Operations (placeholder for now)
+        //----------------------------------------------------------------------
+        
+        // TODO: Implement getMesh, setMesh, loadImage, etc. using PluginContext
+        
+        return JsonValue(JsonObject{{"error", JsonValue("Method not implemented: " + method)}});
+        
+    } catch (const std::exception& e) {
+        BOOST_LOG_TRIVIAL(error) << "Plugin host request error: " << e.what();
+        return JsonValue(JsonObject{{"error", JsonValue(e.what())}});
+    }
+}
+
+void NodePluginRuntime::handle_plugin_notification(const std::string& plugin_id,
+                                                    const std::string& method,
+                                                    const JsonValue& params)
+{
+    try {
+        if (method == "log") {
+            auto message = params["message"].as_string();
+            BOOST_LOG_TRIVIAL(info) << "[Plugin:" << plugin_id << "] " << message;
+            return;
+        }
+        
+        if (method == "error") {
+            auto message = params["message"].as_string();
+            BOOST_LOG_TRIVIAL(error) << "[Plugin:" << plugin_id << "] " << message;
+            return;
+        }
+        
+        if (method == "progress") {
+            auto percent = static_cast<int>(params["percent"].as_int());
+            std::string message = params["message"].as_string();
+            // TODO: Update progress bar in GUI
+            BOOST_LOG_TRIVIAL(info) << "[Plugin:" << plugin_id << "] Progress: " 
+                                    << percent << "% " << message;
+            return;
+        }
+        
+        if (method == "showNotification") {
+            auto message = params["message"].as_string();
+            int duration = static_cast<int>(params["duration"].as_int(3000));
+            // TODO: Show notification toast in GUI
+            // For now, log it
+            BOOST_LOG_TRIVIAL(info) << "[Plugin:" << plugin_id << "] Notification: " << message;
+            
+            // Could use wxWidgets wxNotificationMessage or status bar text
+            // This requires GUI thread access which may need CallAfter
+            return;
+        }
+        
+        BOOST_LOG_TRIVIAL(warning) << "Unknown notification from plugin " << plugin_id 
+                                   << ": " << method;
+                                   
+    } catch (const std::exception& e) {
+        BOOST_LOG_TRIVIAL(error) << "Error handling plugin notification: " << e.what();
+    }
 }
 
 //==============================================================================

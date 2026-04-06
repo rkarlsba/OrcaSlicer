@@ -9,7 +9,8 @@
     "displayName": "BumpMesh",
     "capabilities": [
       "meshModification",
-      "textureMaterial"
+      "textureMaterial",
+      "uiExtension"
     ],
     "icon": "icon.png",
     "configSchema": {

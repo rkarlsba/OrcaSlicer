@@ -196,6 +196,38 @@ public:
     // Add custom plugin search path
     void add_plugin_search_path(const std::filesystem::path& path);
     
+    //--------------------------------------------------------------------------
+    // Plugin Menu System
+    //--------------------------------------------------------------------------
+    
+    // Register a submenu from a plugin
+    bool register_plugin_submenu(const std::string& plugin_id, const SubmenuInfo& submenu);
+    
+    // Unregister a submenu (and all its items)
+    bool unregister_plugin_submenu(const std::string& plugin_id, const std::string& submenu_id);
+    
+    // Register a menu item from a plugin
+    bool register_plugin_menu_item(const std::string& plugin_id, const MenuItemInfo& item);
+    
+    // Unregister a menu item
+    bool unregister_plugin_menu_item(const std::string& plugin_id, const std::string& item_id);
+    
+    // Update a menu item's properties
+    bool update_plugin_menu_item(const std::string& plugin_id, const std::string& item_id, 
+                                  const MenuItemInfo& item);
+    
+    // Get all menu registrations (for building the Plugins menu)
+    std::vector<PluginMenuRegistration> get_all_menu_registrations() const;
+    
+    // Get menu items for a specific plugin
+    std::vector<MenuItemInfo> get_plugin_menu_items(const std::string& plugin_id) const;
+    
+    // Handle menu click - dispatches to the appropriate plugin
+    void handle_menu_click(const std::string& plugin_id, const std::string& item_id);
+    
+    // Set callback for when menu registrations change (GUI rebuilds menu)
+    void set_menu_changed_callback(std::function<void()> callback);
+    
 private:
     //--------------------------------------------------------------------------
     // Internal Methods
@@ -242,6 +274,12 @@ private:
     
     // Search paths
     std::vector<std::filesystem::path> m_search_paths;
+    
+    // Plugin menu registrations (plugin_id -> registration)
+    std::map<std::string, PluginMenuRegistration> m_menu_registrations;
+    
+    // Callback when menus change (GUI updates menu)
+    std::function<void()> m_menu_changed_callback;
 };
 
 //==============================================================================

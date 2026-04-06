@@ -306,6 +306,19 @@ class PluginSDK {
     }
     
     /**
+     * Show a brief notification (toast/status bar)
+     * @param {string} message - Message to display
+     * @param {number} [duration] - Display time in milliseconds (default 3000)
+     */
+    showNotification(message, duration = 3000) {
+        this.ipc.notify('showNotification', {
+            pluginId: this.pluginId,
+            message,
+            duration
+        });
+    }
+    
+    /**
      * Show a confirmation dialog
      * @param {string} title 
      * @param {string} message 
@@ -367,6 +380,161 @@ class PluginSDK {
      */
     async getResourcesDir() {
         return this.ipc.call('getResourcesDir', { pluginId: this.pluginId });
+    }
+    
+    //--------------------------------------------------------------------------
+    // Menu Operations - Register menu items under the Plugins menu
+    //--------------------------------------------------------------------------
+    
+    /**
+     * Register a submenu under the Plugins menu
+     * @param {Object} submenu
+     * @param {string} submenu.id - Unique submenu ID within this plugin
+     * @param {string} submenu.label - Display label
+     * @param {string} [submenu.iconPath] - Optional icon path
+     * @param {number} [submenu.order] - Sort order (default 0)
+     * @returns {Promise<boolean>}
+     */
+    async registerSubmenu(submenu) {
+        return this.ipc.call('registerSubmenu', {
+            pluginId: this.pluginId,
+            submenu: {
+                id: submenu.id,
+                label: submenu.label,
+                iconPath: submenu.iconPath || '',
+                order: submenu.order || 0
+            }
+        });
+    }
+    
+    /**
+     * Unregister a submenu (and all its items)
+     * @param {string} submenuId
+     * @returns {Promise<boolean>}
+     */
+    async unregisterSubmenu(submenuId) {
+        return this.ipc.call('unregisterSubmenu', {
+            pluginId: this.pluginId,
+            submenuId
+        });
+    }
+    
+    /**
+     * Register a menu item
+     * @param {Object} item
+     * @param {string} item.id - Unique item ID within this plugin
+     * @param {string} item.label - Display label
+     * @param {string} [item.tooltip] - Optional tooltip
+     * @param {string} [item.iconPath] - Optional icon path
+     * @param {string} [item.submenuId] - If set, place in this submenu
+     * @param {string} [item.shortcut] - Keyboard shortcut (e.g., "Ctrl+Shift+T")
+     * @param {boolean} [item.checkable] - Whether item is checkable
+     * @param {boolean} [item.checked] - Initial checked state
+     * @param {boolean} [item.disabled] - Initial disabled state
+     * @param {boolean} [item.separator] - If true, item is a separator
+     * @param {number} [item.order] - Sort order (default 0)
+     * @param {*} [item.callbackData] - Extra data passed back on click
+     * @returns {Promise<boolean>}
+     */
+    async registerMenuItem(item) {
+        let flags = 0;
+        if (item.checkable) flags |= 1;    // Checkable
+        if (item.checked) flags |= 2;       // Checked  
+        if (item.disabled) flags |= 4;      // Disabled
+        if (item.separator) flags |= 8;     // Separator
+        
+        return this.ipc.call('registerMenuItem', {
+            pluginId: this.pluginId,
+            item: {
+                id: item.id,
+                label: item.label || '',
+                tooltip: item.tooltip || '',
+                iconPath: item.iconPath || '',
+                submenuId: item.submenuId || '',
+                shortcut: item.shortcut || '',
+                flags: flags,
+                order: item.order || 0,
+                callbackData: JSON.stringify(item.callbackData || null)
+            }
+        });
+    }
+    
+    /**
+     * Unregister a menu item
+     * @param {string} itemId
+     * @returns {Promise<boolean>}
+     */
+    async unregisterMenuItem(itemId) {
+        return this.ipc.call('unregisterMenuItem', {
+            pluginId: this.pluginId,
+            itemId
+        });
+    }
+    
+    /**
+     * Update a menu item's properties
+     * @param {string} itemId
+     * @param {Object} item - Updated properties (same as registerMenuItem)
+     * @returns {Promise<boolean>}
+     */
+    async updateMenuItem(itemId, item) {
+        let flags = 0;
+        if (item.checkable) flags |= 1;
+        if (item.checked) flags |= 2;
+        if (item.disabled) flags |= 4;
+        if (item.separator) flags |= 8;
+        
+        return this.ipc.call('updateMenuItem', {
+            pluginId: this.pluginId,
+            itemId,
+            item: {
+                id: itemId,
+                label: item.label || '',
+                tooltip: item.tooltip || '',
+                iconPath: item.iconPath || '',
+                submenuId: item.submenuId || '',
+                shortcut: item.shortcut || '',
+                flags: flags,
+                order: item.order || 0,
+                callbackData: JSON.stringify(item.callbackData || null)
+            }
+        });
+    }
+    
+    /**
+     * Get all menu items registered by this plugin
+     * @returns {Promise<Object[]>}
+     */
+    async getRegisteredMenuItems() {
+        return this.ipc.call('getRegisteredMenuItems', {
+            pluginId: this.pluginId
+        });
+    }
+    
+    /**
+     * Set callback for when a menu item is clicked
+     * This is automatically called by the plugin host
+     * @param {function(string, *)} callback - (itemId, callbackData) => void
+     * @internal
+     */
+    _setMenuClickHandler(callback) {
+        this._menuClickHandler = callback;
+    }
+    
+    /**
+     * Called by the plugin host when a menu item is clicked
+     * @internal
+     */
+    _handleMenuClick(itemId, callbackData) {
+        if (this._menuClickHandler) {
+            let data = null;
+            try {
+                data = callbackData ? JSON.parse(callbackData) : null;
+            } catch (e) {
+                data = callbackData;
+            }
+            this._menuClickHandler(itemId, data);
+        }
     }
 }
 
@@ -586,6 +754,17 @@ async function main() {
                     const { pluginId, gcode } = msg.params;
                     const result = await manager.callPlugin(pluginId, 'processGcode', { gcode });
                     ipc.response(msg.id, result);
+                    break;
+                }
+                
+                case 'menuClick': {
+                    const { pluginId, itemId, callbackData, isChecked } = msg.params;
+                    await manager.callPlugin(pluginId, 'onMenuClick', { 
+                        itemId, 
+                        callbackData,
+                        isChecked: isChecked || false
+                    });
+                    ipc.response(msg.id, { success: true });
                     break;
                 }
                 

@@ -65,6 +65,10 @@ void PluginHost::initialize(GUI::Plater* plater, GUI::Worker* worker) {
     // Initialize runtimes
     auto node_runtime = std::make_shared<NodePluginRuntime>();
     if (node_runtime->is_available()) {
+        // Set the host script path for Node.js runtime
+        auto host_script = std::filesystem::path(resources_dir()) / "plugins" / "node-host" / "index.js";
+        node_runtime->set_host_script_path(host_script);
+        
         if (node_runtime->initialize()) {
             m_runtimes[PluginType::JavaScript] = node_runtime;
             BOOST_LOG_TRIVIAL(info) << "Plugin: Node.js runtime initialized, version: " 
@@ -89,6 +93,10 @@ void PluginHost::initialize(GUI::Plater* plater, GUI::Worker* worker) {
     m_initialized = true;
     
     BOOST_LOG_TRIVIAL(info) << "Plugin: Host initialized with " << m_plugins.size() << " plugins discovered";
+    
+    // Note: Plugins will be loaded lazily or on demand, not during startup
+    // to avoid blocking the GUI thread. Call load_all_enabled() separately
+    // from a background thread if automatic loading is desired.
 }
 
 void PluginHost::shutdown() {
@@ -748,6 +756,190 @@ bool PluginHost::uninstall_plugin(const std::string& plugin_id) {
     save_configs();
     
     return true;
+}
+
+//------------------------------------------------------------------------------
+// Plugin Menu System Implementation
+//------------------------------------------------------------------------------
+
+bool PluginHost::register_plugin_submenu(const std::string& plugin_id, const SubmenuInfo& submenu) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    
+    auto& reg = m_menu_registrations[plugin_id];
+    reg.plugin_id = plugin_id;
+    
+    // Check if submenu already exists
+    for (auto& existing : reg.submenus) {
+        if (existing.id == submenu.id) {
+            existing = submenu;  // Update
+            if (m_menu_changed_callback) m_menu_changed_callback();
+            return true;
+        }
+    }
+    
+    // Add new submenu
+    reg.submenus.push_back(submenu);
+    BOOST_LOG_TRIVIAL(debug) << "Plugin " << plugin_id << " registered submenu: " << submenu.label;
+    
+    if (m_menu_changed_callback) m_menu_changed_callback();
+    return true;
+}
+
+bool PluginHost::unregister_plugin_submenu(const std::string& plugin_id, const std::string& submenu_id) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    
+    auto it = m_menu_registrations.find(plugin_id);
+    if (it == m_menu_registrations.end()) return false;
+    
+    auto& reg = it->second;
+    
+    // Remove submenu
+    auto sm_it = std::remove_if(reg.submenus.begin(), reg.submenus.end(),
+        [&](const SubmenuInfo& s) { return s.id == submenu_id; });
+    if (sm_it == reg.submenus.end()) return false;
+    reg.submenus.erase(sm_it, reg.submenus.end());
+    
+    // Remove all items in this submenu
+    reg.items.erase(
+        std::remove_if(reg.items.begin(), reg.items.end(),
+            [&](const MenuItemInfo& item) { return item.submenu_id == submenu_id; }),
+        reg.items.end());
+    
+    if (m_menu_changed_callback) m_menu_changed_callback();
+    return true;
+}
+
+bool PluginHost::register_plugin_menu_item(const std::string& plugin_id, const MenuItemInfo& item) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    
+    auto& reg = m_menu_registrations[plugin_id];
+    reg.plugin_id = plugin_id;
+    
+    // Check if item already exists
+    for (auto& existing : reg.items) {
+        if (existing.id == item.id) {
+            existing = item;  // Update
+            if (m_menu_changed_callback) m_menu_changed_callback();
+            return true;
+        }
+    }
+    
+    // Add new item
+    reg.items.push_back(item);
+    BOOST_LOG_TRIVIAL(debug) << "Plugin " << plugin_id << " registered menu item: " << item.label;
+    
+    if (m_menu_changed_callback) m_menu_changed_callback();
+    return true;
+}
+
+bool PluginHost::unregister_plugin_menu_item(const std::string& plugin_id, const std::string& item_id) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    
+    auto it = m_menu_registrations.find(plugin_id);
+    if (it == m_menu_registrations.end()) return false;
+    
+    auto& items = it->second.items;
+    auto item_it = std::remove_if(items.begin(), items.end(),
+        [&](const MenuItemInfo& item) { return item.id == item_id; });
+    if (item_it == items.end()) return false;
+    
+    items.erase(item_it, items.end());
+    
+    if (m_menu_changed_callback) m_menu_changed_callback();
+    return true;
+}
+
+bool PluginHost::update_plugin_menu_item(const std::string& plugin_id, const std::string& item_id,
+                                          const MenuItemInfo& updated_item) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    
+    auto it = m_menu_registrations.find(plugin_id);
+    if (it == m_menu_registrations.end()) return false;
+    
+    for (auto& item : it->second.items) {
+        if (item.id == item_id) {
+            item = updated_item;
+            item.id = item_id;  // Preserve original ID
+            if (m_menu_changed_callback) m_menu_changed_callback();
+            return true;
+        }
+    }
+    
+    return false;
+}
+
+std::vector<PluginMenuRegistration> PluginHost::get_all_menu_registrations() const {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    
+    std::vector<PluginMenuRegistration> result;
+    result.reserve(m_menu_registrations.size());
+    
+    for (const auto& [plugin_id, reg] : m_menu_registrations) {
+        // Only include registrations from loaded plugins
+        auto plugin_it = m_plugins.find(plugin_id);
+        if (plugin_it != m_plugins.end() && plugin_it->second.state == PluginState::Loaded) {
+            result.push_back(reg);
+        }
+    }
+    
+    return result;
+}
+
+std::vector<MenuItemInfo> PluginHost::get_plugin_menu_items(const std::string& plugin_id) const {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    
+    auto it = m_menu_registrations.find(plugin_id);
+    if (it == m_menu_registrations.end()) return {};
+    
+    return it->second.items;
+}
+
+void PluginHost::handle_menu_click(const std::string& plugin_id, const std::string& item_id) {
+    // Find the plugin
+    std::shared_ptr<IPlugin> plugin_instance;
+    MenuItemInfo clicked_item;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        
+        auto plugin_it = m_plugins.find(plugin_id);
+        if (plugin_it == m_plugins.end() || plugin_it->second.state != PluginState::Loaded) {
+            BOOST_LOG_TRIVIAL(warning) << "Plugin menu click: plugin not loaded: " << plugin_id;
+            return;
+        }
+        plugin_instance = plugin_it->second.instance;
+        
+        auto reg_it = m_menu_registrations.find(plugin_id);
+        if (reg_it != m_menu_registrations.end()) {
+            for (const auto& item : reg_it->second.items) {
+                if (item.id == item_id) {
+                    clicked_item = item;
+                    break;
+                }
+            }
+        }
+    }
+    
+    if (!plugin_instance) return;
+    
+    // Create context and dispatch event
+    auto ctx = create_context(plugin_id);
+    if (!ctx) {
+        BOOST_LOG_TRIVIAL(error) << "Plugin menu click: failed to create context for " << plugin_id;
+        return;
+    }
+    
+    MenuEvent event;
+    event.item_id = item_id;
+    event.callback_data = clicked_item.callback_data;
+    event.is_checked = has_flag(clicked_item.flags, MenuItemFlags::Checked);
+    
+    BOOST_LOG_TRIVIAL(debug) << "Plugin menu click: " << plugin_id << " / " << item_id;
+    plugin_instance->on_menu_click(ctx.get(), event);
+}
+
+void PluginHost::set_menu_changed_callback(std::function<void()> callback) {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_menu_changed_callback = std::move(callback);
 }
 
 } // namespace Plugin

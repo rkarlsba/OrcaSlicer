@@ -176,6 +176,69 @@ struct ImageData {
 };
 
 //==============================================================================
+// Plugin Menu System - Dynamic menus registered by plugins
+//==============================================================================
+
+// Menu item flags
+enum class MenuItemFlags : uint32_t {
+    None        = 0,
+    Checkable   = 1 << 0,   // Item can be checked/unchecked
+    Checked     = 1 << 1,   // Initial checked state
+    Disabled    = 1 << 2,   // Item is disabled
+    Separator   = 1 << 3,   // Item is a separator (label ignored)
+};
+
+inline MenuItemFlags operator|(MenuItemFlags a, MenuItemFlags b) {
+    return static_cast<MenuItemFlags>(static_cast<uint32_t>(a) | static_cast<uint32_t>(b));
+}
+inline MenuItemFlags operator&(MenuItemFlags a, MenuItemFlags b) {
+    return static_cast<MenuItemFlags>(static_cast<uint32_t>(a) & static_cast<uint32_t>(b));
+}
+inline bool has_flag(MenuItemFlags set, MenuItemFlags flag) {
+    return static_cast<uint32_t>(set & flag) != 0;
+}
+
+// Information about a single menu item registered by a plugin
+struct MenuItemInfo {
+    std::string id;           // Unique item ID within the plugin (e.g., "apply_texture_wood")
+    std::string label;        // Display label (e.g., "Apply Wood Texture")
+    std::string tooltip;      // Optional tooltip
+    std::string icon_path;    // Optional icon path
+    std::string submenu_id;   // If non-empty, this item is in a submenu
+    std::string shortcut;     // Keyboard shortcut (e.g., "Ctrl+Shift+T")
+    MenuItemFlags flags = MenuItemFlags::None;
+    int order = 0;            // Sort order within menu/submenu
+    
+    // Callback data stored with the registration
+    std::string callback_data;  // Extra data passed back to plugin on click
+};
+
+// Information about a submenu registered by a plugin
+struct SubmenuInfo {
+    std::string id;           // Unique submenu ID within the plugin
+    std::string label;        // Display label
+    std::string icon_path;    // Optional icon
+    int order = 0;            // Sort order
+};
+
+// Full menu registration from a plugin
+struct PluginMenuRegistration {
+    std::string plugin_id;    // The plugin that registered these menus
+    std::vector<SubmenuInfo> submenus;
+    std::vector<MenuItemInfo> items;
+};
+
+// Menu event passed to plugin when item is clicked
+struct MenuEvent {
+    std::string item_id;      // The clicked item's ID
+    std::string callback_data;// The callback_data from MenuItemInfo
+    bool is_checked;          // For checkable items, the new state
+};
+
+// Callback for menu click events
+using MenuClickCallback = std::function<void(const std::string& plugin_id, const MenuEvent& event)>;
+
+//==============================================================================
 // Plugin Progress Callback
 //==============================================================================
 
@@ -284,6 +347,28 @@ public:
     
     // Schedule a function to run on the main UI thread
     virtual void run_on_ui_thread(std::function<void()> fn) = 0;
+    
+    //--------------------------------------------------------------------------
+    // Menu Operations - Plugins can register dynamic menu items
+    //--------------------------------------------------------------------------
+    
+    // Register a submenu under the Plugins menu (optional, items can go at top level)
+    virtual bool register_submenu(const SubmenuInfo& submenu) = 0;
+    
+    // Unregister a submenu (also removes all items in it)
+    virtual bool unregister_submenu(const std::string& submenu_id) = 0;
+    
+    // Register a menu item. If submenu_id is set in item, places it in that submenu.
+    virtual bool register_menu_item(const MenuItemInfo& item) = 0;
+    
+    // Unregister a menu item
+    virtual bool unregister_menu_item(const std::string& item_id) = 0;
+    
+    // Update a menu item's properties (label, enabled state, checked state)
+    virtual bool update_menu_item(const std::string& item_id, const MenuItemInfo& item) = 0;
+    
+    // Get all registered menu items for this plugin
+    virtual std::vector<MenuItemInfo> get_registered_menu_items() const = 0;
 };
 
 //==============================================================================
@@ -342,6 +427,13 @@ public:
     virtual bool export_mesh(PluginContext* ctx,
                              const MeshView& mesh,
                              const std::string& path) { return false; }
+    
+    //--------------------------------------------------------------------------
+    // Menu Hooks (if UIExtension capability)
+    //--------------------------------------------------------------------------
+    
+    // Called when a menu item registered by this plugin is clicked
+    virtual void on_menu_click(PluginContext* ctx, const MenuEvent& event) {}
 };
 
 //==============================================================================

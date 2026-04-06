@@ -90,6 +90,7 @@
 #include "slic3r/Config/Snapshot.hpp"
 #include "Preferences.hpp"
 #include "PluginManagerDialog.hpp"
+#include "libslic3r/Plugin/PluginHost.hpp"
 #include "Tab.hpp"
 #include "SysInfoDialog.hpp"
 #include "UpdateDialogs.hpp"
@@ -3109,6 +3110,21 @@ bool GUI_App::on_init_inner()
     plater_->init_notification_manager();
 
     m_printhost_job_queue.reset(new PrintHostJobQueue(mainframe->printhost_queue_dlg()));
+
+    // Initialize the plugin system (discovery only, no loading yet)
+    BOOST_LOG_TRIVIAL(info) << "Initializing plugin system...";
+    Plugin::plugin_host().initialize(plater_, nullptr);
+    BOOST_LOG_TRIVIAL(info) << "Plugin system initialized";
+    
+    // Load plugins asynchronously after GUI is shown
+    CallAfter([this]() {
+        std::thread plugin_loader([]() {
+            BOOST_LOG_TRIVIAL(info) << "Loading enabled plugins in background...";
+            Plugin::plugin_host().load_all_enabled();
+            BOOST_LOG_TRIVIAL(info) << "Plugin loading complete";
+        });
+        plugin_loader.detach();
+    });
 
     if (is_gcode_viewer()) {
         mainframe->update_layout();
