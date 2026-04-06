@@ -129,7 +129,9 @@ void PluginHost::shutdown() {
     
     for (auto& [id, instance] : to_unload) {
         try {
+            fprintf(stderr, "[Plugin] PluginHost unloading %s...\n", id.c_str());
             instance->on_unload();
+            fprintf(stderr, "[Plugin] PluginHost unloaded %s\n", id.c_str());
         } catch (const std::exception& e) {
             BOOST_LOG_TRIVIAL(error) << "Plugin: Error unloading " << id << ": " << e.what();
         }
@@ -427,6 +429,8 @@ bool PluginHost::load_plugin(const std::string& plugin_id) {
         info2.error_message.clear();
         fprintf(stderr, "[Plugin] %s loaded successfully\n", plugin_id.c_str());
         BOOST_LOG_TRIVIAL(info) << "Plugin: Loaded " << plugin_id << " successfully";
+        // Now that state == Loaded, menu registrations will be visible — trigger rebuild
+        if (m_menu_changed_callback) m_menu_changed_callback();
         lock.unlock();
         fire_event(plugin_id, PluginEvent::Loaded);
         return true;

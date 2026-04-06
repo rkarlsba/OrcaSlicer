@@ -529,12 +529,19 @@ void NodePluginRuntime::shutdown()
 {
     if (!m_initialized) return;
     
+    fprintf(stderr, "[Plugin] NodePluginRuntime::shutdown start\n");
+    
     // Unload all plugins
     for (auto& [id, plugin] : m_plugins) {
+        fprintf(stderr, "[Plugin] on_unload(%s) start\n", id.c_str());
         plugin->on_unload();
+        fprintf(stderr, "[Plugin] on_unload(%s) done\n", id.c_str());
     }
     m_plugins.clear();
+    
+    fprintf(stderr, "[Plugin] clearing plugin_clients (%zu)\n", m_plugin_clients.size());
     m_plugin_clients.clear();
+    fprintf(stderr, "[Plugin] plugin_clients cleared\n");
     
     // Stop Node.js process
     stop_node_process();
@@ -545,6 +552,7 @@ void NodePluginRuntime::shutdown()
     }
     
     m_initialized = false;
+    fprintf(stderr, "[Plugin] NodePluginRuntime::shutdown complete\n");
 }
 
 bool NodePluginRuntime::is_available() const
@@ -1180,7 +1188,9 @@ void IPCClient::stop()
     }
     
     if (m_message_thread.joinable()) {
+        fprintf(stderr, "[Plugin] IPCClient::stop joining message thread...\n");
         m_message_thread.join();
+        fprintf(stderr, "[Plugin] IPCClient::stop message thread joined\n");
     }
 }
 
