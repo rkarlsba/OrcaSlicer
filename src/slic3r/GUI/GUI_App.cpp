@@ -1113,6 +1113,11 @@ void GUI_App::shutdown()
 {
     BOOST_LOG_TRIVIAL(info) << "GUI_App::shutdown enter";
 
+    // Shut down the plugin host while boost::log is still alive.
+    // Without this, s_plugin_host's static destructor fires after boost::log
+    // has been torn down, causing a null-deref crash in BOOST_LOG_TRIVIAL.
+    Plugin::plugin_host().shutdown();
+
 	if (m_removable_drive_manager) {
 		removable_drive_manager()->shutdown();
 	}

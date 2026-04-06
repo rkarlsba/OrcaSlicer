@@ -260,6 +260,7 @@ private:
     
     // Plugin registry
     mutable std::mutex m_mutex;
+    mutable std::mutex m_listener_mutex;  // separate mutex for event listeners, to avoid deadlock
     std::map<std::string, PluginInfo> m_plugins;
     
     // Plugin configurations (plugin_id -> key -> value)

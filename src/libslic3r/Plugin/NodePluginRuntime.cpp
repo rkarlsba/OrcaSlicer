@@ -45,6 +45,7 @@ std::vector<uint8_t> base64_decode(const std::string& encoded) {
 #include <sys/wait.h>
 #include <signal.h>
 #include <fcntl.h>
+#include <poll.h>
 #endif
 
 namespace Slic3r {
@@ -59,8 +60,10 @@ using json = nlohmann::json;
 //==============================================================================
 
 NodePluginInstance::NodePluginInstance(const PluginManifest& manifest,
+                                       const fs::path& plugin_path,
                                        std::shared_ptr<IPCClient> ipc)
     : m_manifest(manifest)
+    , m_plugin_path(plugin_path)
     , m_ipc(ipc)
 {
 }
@@ -75,23 +78,40 @@ bool NodePluginInstance::on_load(PluginContext* ctx)
     m_current_ctx = ctx;
     
     try {
-        // Request plugin to initialize
-        json params;
-        params["pluginId"] = m_manifest.id;
-        params["dataDir"] = ctx->get_plugin_data_dir();
-        params["resourcesDir"] = ctx->get_resources_dir();
+        // Build the manifest sub-object expected by the node-host
+        JsonObject manifest_obj;
+        manifest_obj["id"]          = JsonValue(m_manifest.id);
+        manifest_obj["name"]        = JsonValue(m_manifest.name);
+        manifest_obj["version"]     = JsonValue(m_manifest.version);
+        manifest_obj["entryPoint"]  = JsonValue(m_manifest.entry_point);
+        manifest_obj["description"] = JsonValue(m_manifest.description);
+        manifest_obj["author"]      = JsonValue(m_manifest.author);
         
-        auto result = m_ipc->call("plugin.load", JsonValue(params.dump()));
+        // Build the top-level params object
+        JsonObject params_obj;
+        params_obj["pluginId"]   = JsonValue(m_manifest.id);
+        params_obj["pluginPath"] = JsonValue(m_plugin_path.string());
+        params_obj["manifest"]   = JsonValue(std::move(manifest_obj));
         
+        BOOST_LOG_TRIVIAL(info) << "Plugin: Sending loadPlugin request for " << m_manifest.id;
+        auto result = m_ipc->call("loadPlugin", JsonValue(std::move(params_obj)));
+        
+        // node-host responds with { success: true }
         if (result.is_object()) {
-            auto obj = result.as_object();
-            if (obj.count("success") && obj.at("success").as_bool()) {
+            auto& obj = result.as_object();
+            auto it = obj.find("success");
+            if (it != obj.end() && it->second.as_bool()) {
+                BOOST_LOG_TRIVIAL(info) << "Plugin: " << m_manifest.id << " loaded successfully";
                 return true;
             }
         }
+        BOOST_LOG_TRIVIAL(warning) << "Plugin: " << m_manifest.id << " on_load returned unexpected result";
         return false;
     } catch (const std::exception& e) {
-        ctx->progress()->error(std::string("Failed to load plugin: ") + e.what());
+        BOOST_LOG_TRIVIAL(error) << "Plugin: Failed to load " << m_manifest.id << ": " << e.what();
+        if (ctx && ctx->progress()) {
+            ctx->progress()->error(std::string("Failed to load plugin: ") + e.what());
+        }
         return false;
     }
 }
@@ -100,7 +120,7 @@ void NodePluginInstance::on_unload()
 {
     if (m_ipc && m_ipc->is_connected()) {
         try {
-            m_ipc->call("plugin.unload", JsonValue());
+            m_ipc->call("unloadPlugin", JsonValue());
         } catch (...) {
             // Ignore errors during unload
         }
@@ -563,35 +583,52 @@ std::shared_ptr<IPlugin> NodePluginRuntime::load_plugin(const PluginManifest& ma
             bp::std_err > bp::null
         );
         
-        // Create transport
-        auto transport = std::make_shared<StdioTransport>(
-            stdout_pipe.native_source(),
-            stdin_pipe.native_sink()
-        );
+        // Dup the file descriptors BEFORE the bp::pipe locals go out of scope.
+        // bp::pipe destructors close the original fds; dup() gives us independent
+        // fds that remain valid for the lifetime of the transport.
+#ifdef _WIN32
+        int raw_read_fd  = ::_dup(stdout_pipe.native_source());
+        int raw_write_fd = ::_dup(stdin_pipe.native_sink());
+#else
+        int raw_read_fd  = ::dup(stdout_pipe.native_source());
+        int raw_write_fd = ::dup(stdin_pipe.native_sink());
+#endif
+        if (raw_read_fd < 0 || raw_write_fd < 0) {
+            BOOST_LOG_TRIVIAL(error) << "Plugin: dup() failed for plugin " << manifest.id;
+            plugin_process.detach();
+            return nullptr;
+        }
+        
+        // Create transport with the dup'd fds (it now owns them)
+        auto transport = std::make_shared<StdioTransport>(raw_read_fd, raw_write_fd);
         
         // Create IPC client
         auto client = std::make_shared<IPCClient>(transport);
         
+        // Capture plugin id by value — manifest is a local parameter and must not
+        // be captured by reference since the lambda outlives this function.
+        std::string plugin_id = manifest.id;
+        
         // Set up request handler for host API calls
-        client->set_request_handler([this, &manifest](const std::string& method, const JsonValue& params) -> JsonValue {
-            return handle_host_request(manifest.id, method, params);
+        client->set_request_handler([this, plugin_id](const std::string& method, const JsonValue& params) -> JsonValue {
+            return handle_host_request(plugin_id, method, params);
         });
         
         // Set up notification handler for fire-and-forget messages from plugin
-        client->set_notification_handler([this, &manifest](const std::string& method, const JsonValue& params) {
-            handle_plugin_notification(manifest.id, method, params);
+        client->set_notification_handler([this, plugin_id](const std::string& method, const JsonValue& params) {
+            handle_plugin_notification(plugin_id, method, params);
         });
         
         client->start();
         
-        // Create plugin instance
-        auto plugin = std::make_shared<NodePluginInstance>(manifest, client);
+        // Create plugin instance (passes plugin path so on_load() can send it to node-host)
+        auto plugin = std::make_shared<NodePluginInstance>(manifest, path, client);
         
         // Store handles
         m_plugins[manifest.id] = plugin;
         m_plugin_clients[manifest.id] = client;
         
-        // Detach process (it runs independently)
+        // Detach process (it runs independently, communicating via the dup'd fds)
         plugin_process.detach();
         
         return plugin;
@@ -1018,7 +1055,9 @@ bool StdioTransport::write_message(const std::string& data)
 
 std::string StdioTransport::read_message()
 {
-    // Read length prefix
+    // Read length prefix with poll() so that close() can interrupt this call
+    // by setting m_connected=false without closing the fd from another thread
+    // (which would be UB and not reliably wake a blocking read() on macOS).
     uint8_t header[4];
     
 #ifdef _WIN32
@@ -1029,10 +1068,24 @@ std::string StdioTransport::read_message()
         return "";
     }
 #else
-    ssize_t n = read(m_read_fd, header, 4);
-    if (n != 4) {
-        m_connected = false;
-        return "";
+    // Poll with 100ms timeout so we check m_connected between polls.
+    // When close() sets m_connected=false, this loop exits within 100ms.
+    size_t header_read = 0;
+    while (header_read < 4) {
+        if (!m_connected || m_read_fd < 0) return "";
+        struct pollfd pfd;
+        pfd.fd = m_read_fd;
+        pfd.events = POLLIN;
+        pfd.revents = 0;
+        int ret = ::poll(&pfd, 1, 100);
+        if (ret < 0 && errno == EINTR) continue;
+        if (ret < 0) { m_connected = false; return ""; }
+        if (ret == 0) continue; // timeout — loop back and check m_connected
+        if (pfd.revents & (POLLHUP | POLLERR | POLLNVAL)) { m_connected = false; return ""; }
+        if (!(pfd.revents & POLLIN)) continue;
+        ssize_t n = ::read(m_read_fd, header + header_read, 4 - header_read);
+        if (n <= 0) { m_connected = false; return ""; }
+        header_read += n;
     }
 #endif
     
@@ -1055,11 +1108,19 @@ std::string StdioTransport::read_message()
 #else
     size_t total_read = 0;
     while (total_read < len) {
-        ssize_t r = read(m_read_fd, &data[total_read], len - total_read);
-        if (r <= 0) {
-            m_connected = false;
-            return "";
-        }
+        if (!m_connected || m_read_fd < 0) return "";
+        struct pollfd pfd;
+        pfd.fd = m_read_fd;
+        pfd.events = POLLIN;
+        pfd.revents = 0;
+        int ret = ::poll(&pfd, 1, 100);
+        if (ret < 0 && errno == EINTR) continue;
+        if (ret < 0) { m_connected = false; return ""; }
+        if (ret == 0) continue;
+        if (pfd.revents & (POLLHUP | POLLERR | POLLNVAL)) { m_connected = false; return ""; }
+        if (!(pfd.revents & POLLIN)) continue;
+        ssize_t r = ::read(m_read_fd, &data[total_read], len - total_read);
+        if (r <= 0) { m_connected = false; return ""; }
         total_read += r;
     }
 #endif
@@ -1334,7 +1395,9 @@ std::optional<IPCMessage> IPCMessage::parse(const std::string& data)
             }
             
             if (j.contains("params")) {
-                msg.params = JsonValue(j["params"].dump());
+                // Parse into a proper JsonValue object, not a raw string, so
+                // callers can access fields via operator[].
+                msg.params = JsonValue::parse(j["params"].dump());
             }
         } else if (j.contains("result") || j.contains("error")) {
             msg.type = IPCMessageType::Response;
@@ -1343,7 +1406,8 @@ std::optional<IPCMessage> IPCMessage::parse(const std::string& data)
                 msg.error_code = j["error"]["code"].get<int>();
                 msg.error = j["error"]["message"].get<std::string>();
             } else {
-                msg.result = JsonValue(j["result"].dump());
+                // Parse into a proper JsonValue object so callers can access fields.
+                msg.result = JsonValue::parse(j["result"].dump());
             }
         }
         

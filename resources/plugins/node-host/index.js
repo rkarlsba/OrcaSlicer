@@ -628,7 +628,7 @@ class PluginManager {
     }
     
     async loadPlugin(pluginId, pluginPath, manifest) {
-        console.log(`Loading plugin: ${pluginId} from ${pluginPath}`);
+        console.error(`Loading plugin: ${pluginId} from ${pluginPath}`);
         
         try {
             // Resolve the entry point
@@ -705,7 +705,7 @@ class PluginManager {
 //==============================================================================
 
 async function main() {
-    console.log('OrcaSlicer Node.js Plugin Runtime starting...');
+    console.error('OrcaSlicer Node.js Plugin Runtime starting...');
     
     // Create IPC channel over stdin/stdout
     const ipc = new IPCChannel(process.stdin, process.stdout);
@@ -774,7 +774,7 @@ async function main() {
                 }
                 
                 case 'shutdown': {
-                    console.log('Shutdown requested');
+                    console.error('Shutdown requested');
                     ipc.response(msg.id, { success: true });
                     process.exit(0);
                     break;
@@ -790,7 +790,7 @@ async function main() {
     });
     
     ipc.on('close', () => {
-        console.log('IPC channel closed');
+        console.error('IPC channel closed');
         process.exit(0);
     });
     
@@ -801,7 +801,7 @@ async function main() {
     // Notify host that we're ready
     ipc.notify('ready', { version: process.version });
     
-    console.log('Plugin runtime ready');
+    console.error('Plugin runtime ready');
 }
 
 // Export utilities for plugins

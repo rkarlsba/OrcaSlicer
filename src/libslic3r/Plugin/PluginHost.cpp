@@ -63,21 +63,22 @@ void PluginHost::initialize(GUI::Plater* plater, GUI::Worker* worker) {
     m_worker = worker;
     
     // Initialize runtimes
+    // Note: set_host_script_path and initialize() must be called BEFORE is_available(),
+    // because is_available() requires m_initialized == true (set inside initialize()).
     auto node_runtime = std::make_shared<NodePluginRuntime>();
-    if (node_runtime->is_available()) {
-        // Set the host script path for Node.js runtime
-        auto host_script = std::filesystem::path(resources_dir()) / "plugins" / "node-host" / "index.js";
-        node_runtime->set_host_script_path(host_script);
-        
-        if (node_runtime->initialize()) {
-            m_runtimes[PluginType::JavaScript] = node_runtime;
-            BOOST_LOG_TRIVIAL(info) << "Plugin: Node.js runtime initialized, version: " 
-                                    << node_runtime->version();
-        } else {
-            BOOST_LOG_TRIVIAL(warning) << "Plugin: Failed to initialize Node.js runtime";
-        }
+    auto host_script = std::filesystem::path(resources_dir()) / "plugins" / "node-host" / "index.js";
+    node_runtime->set_host_script_path(host_script);
+    fprintf(stderr, "[Plugin] host_script=%s exists=%d\n",
+            host_script.c_str(), (int)std::filesystem::exists(host_script));
+    if (node_runtime->initialize()) {
+        m_runtimes[PluginType::JavaScript] = node_runtime;
+        fprintf(stderr, "[Plugin] Node.js runtime initialized, version: %s\n",
+                node_runtime->version().c_str());
+        BOOST_LOG_TRIVIAL(info) << "Plugin: Node.js runtime initialized, version: "
+                                << node_runtime->version();
     } else {
-        BOOST_LOG_TRIVIAL(info) << "Plugin: Node.js not available, JS plugins disabled";
+        fprintf(stderr, "[Plugin] Node.js runtime unavailable (node not installed or host script missing)\n");
+        BOOST_LOG_TRIVIAL(warning) << "Plugin: Node.js runtime unavailable (node not installed or host script missing)";
     }
     
     // Future: Initialize Python runtime
@@ -92,6 +93,7 @@ void PluginHost::initialize(GUI::Plater* plater, GUI::Worker* worker) {
     
     m_initialized = true;
     
+    fprintf(stderr, "[Plugin] Host initialized, %zu plugin(s) discovered\n", m_plugins.size());
     BOOST_LOG_TRIVIAL(info) << "Plugin: Host initialized with " << m_plugins.size() << " plugins discovered";
     
     // Note: Plugins will be loaded lazily or on demand, not during startup
@@ -100,7 +102,7 @@ void PluginHost::initialize(GUI::Plater* plater, GUI::Worker* worker) {
 }
 
 void PluginHost::shutdown() {
-    std::lock_guard<std::mutex> lock(m_mutex);
+    std::unique_lock<std::mutex> lock(m_mutex);
     
     if (!m_initialized) return;
     
@@ -109,18 +111,32 @@ void PluginHost::shutdown() {
     // Save configurations
     save_configs();
     
-    // Unload all plugins
+    // Collect loaded instances to unload, clearing them from the map immediately
+    // so the state is consistent before we release the lock.
+    std::vector<std::pair<std::string, std::shared_ptr<IPlugin>>> to_unload;
     for (auto& [id, info] : m_plugins) {
         if (info.state == PluginState::Loaded && info.instance) {
-            try {
-                info.instance->on_unload();
-            } catch (const std::exception& e) {
-                BOOST_LOG_TRIVIAL(error) << "Plugin: Error unloading " << id << ": " << e.what();
-            }
+            to_unload.emplace_back(id, std::move(info.instance));
             info.instance.reset();
             info.state = PluginState::Unloaded;
         }
     }
+    
+    // Release the lock before calling on_unload() — on_unload() sends
+    // an IPC message to the node process and waits for a response, so
+    // holding m_mutex here would block any concurrent plugin callbacks.
+    lock.unlock();
+    
+    for (auto& [id, instance] : to_unload) {
+        try {
+            instance->on_unload();
+        } catch (const std::exception& e) {
+            BOOST_LOG_TRIVIAL(error) << "Plugin: Error unloading " << id << ": " << e.what();
+        }
+    }
+    to_unload.clear();
+    
+    lock.lock();
     
     // Shutdown all runtimes
     for (auto& [type, runtime] : m_runtimes) {
@@ -318,7 +334,7 @@ std::optional<PluginInfo> PluginHost::get_plugin(const std::string& plugin_id) c
 //------------------------------------------------------------------------------
 
 bool PluginHost::load_plugin(const std::string& plugin_id) {
-    std::lock_guard<std::mutex> lock(m_mutex);
+    std::unique_lock<std::mutex> lock(m_mutex);
     
     auto it = m_plugins.find(plugin_id);
     if (it == m_plugins.end()) {
@@ -340,6 +356,7 @@ bool PluginHost::load_plugin(const std::string& plugin_id) {
     if (!check_dependencies(plugin_id)) {
         info.state = PluginState::Error;
         info.error_message = "Missing dependencies";
+        lock.unlock();
         fire_event(plugin_id, PluginEvent::Error);
         return false;
     }
@@ -351,45 +368,80 @@ bool PluginHost::load_plugin(const std::string& plugin_id) {
         info.error_message = "No runtime available for plugin type";
         BOOST_LOG_TRIVIAL(error) << "Plugin: No runtime for " << plugin_id 
                                   << " (type " << static_cast<int>(info.manifest.type) << ")";
+        lock.unlock();
         fire_event(plugin_id, PluginEvent::Error);
         return false;
     }
     
     // Load plugin
     info.state = PluginState::Loading;
+    fprintf(stderr, "[Plugin] Loading %s\n", plugin_id.c_str());
     BOOST_LOG_TRIVIAL(info) << "Plugin: Loading " << plugin_id;
     
     try {
-        info.instance = runtime->load_plugin(info.manifest, info.install_path);
-        if (!info.instance) {
+        auto instance = runtime->load_plugin(info.manifest, info.install_path);
+        if (!instance) {
             info.state = PluginState::Error;
             info.error_message = "Failed to create plugin instance";
+            lock.unlock();
             fire_event(plugin_id, PluginEvent::Error);
             return false;
         }
         
-        // Create plugin context and call on_load
+        // Store instance and create context while lock is held
+        info.instance = instance;
         auto ctx = create_context(plugin_id);
-        if (!info.instance->on_load(ctx.get())) {
-            info.state = PluginState::Error;
-            info.error_message = "Plugin on_load() returned false";
-            info.instance.reset();
+        
+        // MUST release m_mutex before calling on_load():
+        // on_load() blocks until the node process responds to "loadPlugin",
+        // but during that time the node process will call back into
+        // registerSubmenu / registerMenuItem — those also need m_mutex.
+        // Holding m_mutex here would cause a deadlock.
+        lock.unlock();
+        
+        bool loaded = false;
+        std::string load_error;
+        try {
+            loaded = instance->on_load(ctx.get());
+            if (!loaded) load_error = "Plugin on_load() returned false";
+        } catch (const std::exception& ex) {
+            load_error = ex.what();
+        }
+        
+        lock.lock();
+        it = m_plugins.find(plugin_id);
+        if (it == m_plugins.end()) return false;
+        auto& info2 = it->second;
+        
+        if (!loaded) {
+            info2.state = PluginState::Error;
+            info2.error_message = load_error;
+            info2.instance.reset();
+            BOOST_LOG_TRIVIAL(error) << "Plugin: Failed to load " << plugin_id << ": " << load_error;
+            lock.unlock();
             fire_event(plugin_id, PluginEvent::Error);
             return false;
         }
         
-        info.state = PluginState::Loaded;
-        info.error_message.clear();
-        
+        info2.state = PluginState::Loaded;
+        info2.error_message.clear();
+        fprintf(stderr, "[Plugin] %s loaded successfully\n", plugin_id.c_str());
         BOOST_LOG_TRIVIAL(info) << "Plugin: Loaded " << plugin_id << " successfully";
+        lock.unlock();
         fire_event(plugin_id, PluginEvent::Loaded);
         return true;
         
     } catch (const std::exception& e) {
-        info.state = PluginState::Error;
-        info.error_message = e.what();
-        info.instance.reset();
+        if (!lock.owns_lock()) lock.lock();
+        it = m_plugins.find(plugin_id);
+        if (it != m_plugins.end()) {
+            auto& info3 = it->second;
+            info3.state = PluginState::Error;
+            info3.error_message = e.what();
+            info3.instance.reset();
+        }
         BOOST_LOG_TRIVIAL(error) << "Plugin: Exception loading " << plugin_id << ": " << e.what();
+        lock.unlock();
         fire_event(plugin_id, PluginEvent::Error);
         return false;
     }
@@ -552,22 +604,23 @@ std::string PluginHost::execute_gcode_plugins(const std::string& gcode) {
 //------------------------------------------------------------------------------
 
 int PluginHost::add_event_listener(PluginEventCallback callback) {
-    std::lock_guard<std::mutex> lock(m_mutex);
+    std::lock_guard<std::mutex> lock(m_listener_mutex);
     int id = m_next_listener_id++;
     m_listeners[id] = std::move(callback);
     return id;
 }
 
 void PluginHost::remove_event_listener(int listener_id) {
-    std::lock_guard<std::mutex> lock(m_mutex);
+    std::lock_guard<std::mutex> lock(m_listener_mutex);
     m_listeners.erase(listener_id);
 }
 
 void PluginHost::fire_event(const std::string& plugin_id, PluginEvent event) {
-    // Make a copy of listeners to avoid holding lock during callbacks
+    // Use a SEPARATE listener mutex (not m_mutex) so this can be called freely
+    // from any context including while m_mutex is held by the calling thread.
     std::vector<PluginEventCallback> callbacks;
     {
-        std::lock_guard<std::mutex> lock(m_mutex);
+        std::lock_guard<std::mutex> lock(m_listener_mutex);
         callbacks.reserve(m_listeners.size());
         for (const auto& [id, cb] : m_listeners) {
             callbacks.push_back(cb);

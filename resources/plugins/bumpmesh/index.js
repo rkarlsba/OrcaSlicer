@@ -101,7 +101,7 @@ class BumpMeshPlugin {
             await sdk.registerSubmenu({
                 id: 'bumpmesh',
                 label: 'BumpMesh Textures',
-                position: 0
+                order: 0
             });
             sdk.log('Registered BumpMesh submenu');
             
@@ -113,7 +113,7 @@ class BumpMeshPlugin {
                     submenuId: 'bumpmesh',
                     label: tex.label,
                     callbackData: JSON.stringify({ action: 'applyTexture', textureId: tex.id }),
-                    position: i
+                    order: i
                 });
             }
             sdk.log(`Registered ${BUILTIN_TEXTURES.length} texture menu items`);
@@ -124,7 +124,7 @@ class BumpMeshPlugin {
                 submenuId: 'bumpmesh',
                 label: 'Open Custom Texture...',
                 callbackData: JSON.stringify({ action: 'customTexture' }),
-                position: BUILTIN_TEXTURES.length + 1
+                order: BUILTIN_TEXTURES.length + 1
             });
             sdk.log('Registered custom texture menu item');
             

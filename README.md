@@ -14,6 +14,15 @@ Several clickbait and malicious websites, such as **orca-slicer[.]com** and **or
 pretending to be the official OrcaSlicer site. These sites may redirect you to dangerous downloads or contain
 misleading information.<br>
 
+## Branches
+
+As of now, this only has a single in addition to **main**:
+
+### plugin_api
+
+The plugin API is an extension to OrcaSlicer to allow for third party plugins. See the branch's README for
+details.
+
 ## Downloads
 
 For now, there's only the source, but I may upload more stuff after a while. See the original orcaslicer

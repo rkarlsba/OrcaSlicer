@@ -22,7 +22,8 @@ namespace Plugin {
 
 class NodePluginInstance : public IPlugin {
 public:
-    NodePluginInstance(const PluginManifest& manifest, 
+    NodePluginInstance(const PluginManifest& manifest,
+                       const std::filesystem::path& plugin_path,
                        std::shared_ptr<IPCClient> ipc);
     ~NodePluginInstance();
     
@@ -55,6 +56,7 @@ public:
     
 private:
     PluginManifest m_manifest;
+    std::filesystem::path m_plugin_path;
     std::shared_ptr<IPCClient> m_ipc;
     PluginContext* m_current_ctx = nullptr;
     
