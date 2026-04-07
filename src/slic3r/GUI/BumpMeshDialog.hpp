@@ -9,6 +9,8 @@
 #include "Widgets/CheckBox.hpp"
 #include "Widgets/ComboBox.hpp"
 
+#include "libslic3r/TriangleMesh.hpp"
+
 #include <wx/dialog.h>
 #include <wx/slider.h>
 #include <wx/stattext.h>
@@ -136,11 +138,18 @@ private:
     void on_texture_selected(const std::string& id);
     void update_preview();
     void on_custom_texture();
+    void apply_displacement_to_model(bool is_preview);
+    void restore_original_mesh();
     void on_apply(wxCommandEvent& evt);
     void on_close(wxCommandEvent& evt);
 
     int m_object_idx;
     Settings m_settings;
+
+    // Original mesh backup for undo/re-preview
+    indexed_triangle_set m_original_mesh;
+    bool m_has_original_mesh = false;
+    bool m_preview_applied   = false;
 
     // Texture thumbnails panel
     wxScrolledWindow* m_texture_grid = nullptr;

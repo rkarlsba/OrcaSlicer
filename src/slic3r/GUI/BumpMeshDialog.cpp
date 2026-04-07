@@ -6,10 +6,13 @@
 #include "I18N.hpp"
 #include "GUI.hpp"
 #include "GUI_App.hpp"
+#include "Plater.hpp"
 #include "Widgets/Label.hpp"
 #include "Widgets/StaticLine.hpp"
 #include "Widgets/CheckBox.hpp"
 
+#include "libslic3r/Model.hpp"
+#include "libslic3r/MeshDisplacement.hpp"
 #include "libslic3r/Plugin/PluginHost.hpp"
 #include "libslic3r/Utils.hpp"
 
@@ -21,6 +24,7 @@
 #include <wx/busycursor.h>
 #include <wx/image.h>
 #include <wx/filename.h>
+#include <wx/progdlg.h>
 
 namespace Slic3r {
 namespace GUI {
@@ -222,6 +226,13 @@ void BumpMeshDialog::build_ui()
     // Bottom buttons
     auto* btn_sizer = new wxBoxSizer(wxHORIZONTAL);
     btn_sizer->AddStretchSpacer();
+
+    auto* preview_btn = new Button(this, _L("Preview"));
+    preview_btn->SetMinSize(wxSize(FromDIP(90), FromDIP(32)));
+    preview_btn->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) {
+        apply_displacement_to_model(true);
+    });
+    btn_sizer->Add(preview_btn, 0, wxRIGHT, FromDIP(8));
 
     auto* apply_btn = new Button(this, _L("Apply"));
     apply_btn->SetMinSize(wxSize(FromDIP(90), FromDIP(32)));
@@ -634,6 +645,196 @@ wxPanel* BumpMeshDialog::create_export_section(wxWindow* parent)
 }
 
 //------------------------------------------------------------------------------
+// Mesh displacement helpers
+//------------------------------------------------------------------------------
+
+// Resolve the texture file path for the currently selected texture
+static std::string resolve_texture_path(const std::string& texture_id,
+                                         const std::vector<TextureInfo>& textures)
+{
+    // Custom textures start with "custom:"
+    if (texture_id.substr(0, 7) == "custom:")
+        return texture_id.substr(7);
+
+    // Built-in textures — find the file in textures directory
+    for (const auto& ti : textures) {
+        if (ti.id == texture_id && !ti.file.empty()) {
+            return Slic3r::resources_dir() + "/plugins/bumpmesh/textures/" + ti.file;
+        }
+    }
+    return {};
+}
+
+void BumpMeshDialog::restore_original_mesh()
+{
+    if (!m_has_original_mesh)
+        return;
+
+    Plater* plater = wxGetApp().plater();
+    Model& model = plater->model();
+    if (m_object_idx < 0 || m_object_idx >= (int)model.objects.size())
+        return;
+
+    ModelObject* obj = model.objects[m_object_idx];
+    if (obj->volumes.empty())
+        return;
+
+    ModelVolume* vol = obj->volumes[0];
+    vol->set_mesh(std::move(m_original_mesh));
+    vol->calculate_convex_hull();
+    obj->invalidate_bounding_box();
+    plater->changed_mesh(m_object_idx);
+
+    m_preview_applied = false;
+    BOOST_LOG_TRIVIAL(info) << "BumpMesh: restored original mesh";
+}
+
+void BumpMeshDialog::apply_displacement_to_model(bool is_preview)
+{
+    if (m_settings.texture_id.empty()) {
+        wxMessageBox(_L("Please select a texture first."),
+                     _L("BumpMesh"), wxOK | wxICON_WARNING, this);
+        return;
+    }
+
+    Plater* plater = wxGetApp().plater();
+    Model& model = plater->model();
+    if (m_object_idx < 0 || m_object_idx >= (int)model.objects.size()) {
+        wxMessageBox(_L("Invalid object index."),
+                     _L("BumpMesh"), wxOK | wxICON_ERROR, this);
+        return;
+    }
+
+    ModelObject* obj = model.objects[m_object_idx];
+    if (obj->volumes.empty()) {
+        wxMessageBox(_L("Object has no volumes."),
+                     _L("BumpMesh"), wxOK | wxICON_ERROR, this);
+        return;
+    }
+
+    ModelVolume* vol = obj->volumes[0];
+
+    // If previewing again, restore original before re-applying
+    if (m_preview_applied && m_has_original_mesh) {
+        vol->set_mesh(indexed_triangle_set(m_original_mesh));
+        vol->calculate_convex_hull();
+        obj->invalidate_bounding_box();
+    }
+
+    // Save original mesh if we haven't yet
+    if (!m_has_original_mesh) {
+        m_original_mesh = vol->mesh().its;
+        m_has_original_mesh = true;
+    }
+
+    // Load displacement texture via wxImage (GUI layer)
+    std::string tex_path = resolve_texture_path(m_settings.texture_id, m_textures);
+    if (tex_path.empty()) {
+        wxMessageBox(_L("Could not find texture file."),
+                     _L("BumpMesh"), wxOK | wxICON_ERROR, this);
+        return;
+    }
+
+    DisplacementTexture texture;
+    {
+        wxImage img;
+        if (!img.LoadFile(wxString::FromUTF8(tex_path))) {
+            wxMessageBox(_L("Failed to load texture image."),
+                         _L("BumpMesh"), wxOK | wxICON_ERROR, this);
+            return;
+        }
+        img = img.ConvertToGreyscale();
+        texture.width  = img.GetWidth();
+        texture.height = img.GetHeight();
+        texture.pixels.resize(texture.width * texture.height);
+        const unsigned char* rgb = img.GetData();
+        for (int i = 0; i < texture.width * texture.height; ++i)
+            texture.pixels[i] = rgb[i * 3]; // R==G==B after greyscale
+    }
+
+    if (!texture.valid()) {
+        wxMessageBox(_L("Texture image is empty."),
+                     _L("BumpMesh"), wxOK | wxICON_ERROR, this);
+        return;
+    }
+
+    // Build displacement settings from dialog
+    DisplacementSettings ds;
+    ds.amplitude         = (float) m_settings.amplitude;
+    ds.scale_u           = (float) m_settings.scale_u;
+    ds.scale_v           = (float) m_settings.scale_v;
+    ds.offset_u          = (float) m_settings.offset_u;
+    ds.offset_v          = (float) m_settings.offset_v;
+    ds.rotation          = (float) m_settings.rotation;
+    ds.projection_mode   = m_settings.projection_mode;
+    ds.symmetric         = m_settings.symmetric;
+    ds.top_angle_limit   = (float) m_settings.top_faces;
+    ds.bottom_angle_limit = (float) m_settings.bottom_faces;
+
+    // For preview, use coarser subdivision (faster)
+    if (is_preview) {
+        // Use the resolution setting but with a coarser default
+        ds.max_edge_length = (float) m_settings.resolution * 3.0f;
+        if (ds.max_edge_length <= 0.0f)
+            ds.max_edge_length = 0.5f;
+    } else {
+        ds.max_edge_length = (float) m_settings.resolution;
+    }
+
+    // Show progress dialog
+    wxProgressDialog progress_dlg(
+        _L("BumpMesh — Processing"),
+        is_preview ? _L("Generating preview...") : _L("Applying displacement..."),
+        100, this,
+        wxPD_APP_MODAL | wxPD_AUTO_HIDE | wxPD_CAN_ABORT);
+    progress_dlg.Show();
+
+    bool cancelled = false;
+
+    // Get the source mesh (always from original)
+    const indexed_triangle_set& source = m_original_mesh;
+
+    BOOST_LOG_TRIVIAL(info) << "BumpMesh: " << (is_preview ? "preview" : "apply")
+                            << " texture='" << m_settings.texture_id
+                            << "' amplitude=" << ds.amplitude
+                            << " scale=" << ds.scale_u << "x" << ds.scale_v
+                            << " projection=" << ds.projection_mode
+                            << " max_edge=" << ds.max_edge_length;
+
+    // Apply displacement
+    indexed_triangle_set displaced = apply_displacement(
+        source, texture, ds,
+        [&](float frac) {
+            int pct = std::clamp(int(frac * 100), 0, 100);
+            if (!progress_dlg.Update(pct))
+                cancelled = true;
+        });
+
+    progress_dlg.Update(100);
+
+    if (cancelled) {
+        BOOST_LOG_TRIVIAL(info) << "BumpMesh: displacement cancelled by user";
+        return;
+    }
+
+    // Replace the volume's mesh
+    TriangleMesh new_mesh(std::move(displaced));
+
+    vol->set_mesh(std::move(new_mesh));
+    vol->calculate_convex_hull();
+    obj->invalidate_bounding_box();
+
+    // Notify plater to refresh 3D viewport
+    plater->changed_mesh(m_object_idx);
+
+    m_preview_applied = is_preview;
+
+    wxString action = is_preview ? _L("Preview applied") : _L("Displacement applied");
+    BOOST_LOG_TRIVIAL(info) << "BumpMesh: " << action.ToStdString()
+                            << ", faces=" << vol->mesh().facets_count();
+}
+
+//------------------------------------------------------------------------------
 // Actions
 //------------------------------------------------------------------------------
 
@@ -721,53 +922,26 @@ void BumpMeshDialog::on_custom_texture()
 
 void BumpMeshDialog::on_apply(wxCommandEvent& evt)
 {
-    if (m_settings.texture_id.empty()) {
-        wxMessageBox(_L("Please select a texture first."),
-                     _L("BumpMesh"), wxOK | wxICON_WARNING, this);
-        return;
-    }
-
-    // Log the settings for debugging
-    BOOST_LOG_TRIVIAL(info) << "BumpMesh: applying texture '" << m_settings.texture_id
-                            << "' to object " << m_object_idx
-                            << " (amplitude=" << m_settings.amplitude
-                            << ", scale_u=" << m_settings.scale_u
-                            << ", scale_v=" << m_settings.scale_v
-                            << ", projection=" << m_settings.projection_mode << ")";
-
-    // Find the texture name for display
-    std::string tex_name = m_settings.texture_id;
-    for (const auto& ti : m_textures) {
-        if (ti.id == m_settings.texture_id) {
-            tex_name = ti.name;
-            break;
-        }
-    }
-
-    // The plugin mesh SDK (getMesh/setMesh) is not yet implemented in the
-    // host-side IPC layer, so we cannot process mesh data through the plugin.
-    // Show an informational message with the selected settings.
-    wxString msg = wxString::Format(
-        _L("Texture: %s\n"
-           "Object index: %d\n"
-           "Amplitude: %.2f\n"
-           "Scale: %.2f x %.2f\n"
-           "Projection mode: %d\n\n"
-           "Mesh displacement processing via the plugin SDK is not yet "
-           "implemented. The settings have been recorded and will be applied "
-           "once the mesh processing pipeline is connected."),
-        wxString::FromUTF8(tex_name),
-        m_object_idx,
-        m_settings.amplitude,
-        m_settings.scale_u, m_settings.scale_v,
-        m_settings.projection_mode);
-
-    wxMessageBox(msg, _L("BumpMesh — Settings Recorded"),
-                 wxOK | wxICON_INFORMATION, this);
+    apply_displacement_to_model(false);
+    // Close the dialog after successful final apply
+    if (m_has_original_mesh)
+        EndModal(wxID_OK);
 }
 
 void BumpMeshDialog::on_close(wxCommandEvent& evt)
 {
+    // If a preview was applied, restore the original mesh on close
+    if (m_preview_applied) {
+        int answer = wxMessageBox(
+            _L("A preview displacement is currently applied.\n\n"
+               "Do you want to keep the preview changes?"),
+            _L("BumpMesh"),
+            wxYES_NO | wxCANCEL | wxICON_QUESTION, this);
+        if (answer == wxCANCEL)
+            return;
+        if (answer == wxNO)
+            restore_original_mesh();
+    }
     EndModal(wxID_CANCEL);
 }
 
