@@ -15,6 +15,7 @@
 #include "libslic3r/MeshDisplacement.hpp"
 #include "libslic3r/Plugin/PluginHost.hpp"
 #include "libslic3r/Utils.hpp"
+#include "GLCanvas3D.hpp"
 
 #include <wx/statbox.h>
 #include <wx/checkbox.h>
@@ -680,10 +681,24 @@ void BumpMeshDialog::restore_original_mesh()
         return;
 
     ModelVolume* vol = obj->volumes[0];
-    vol->set_mesh(std::move(m_original_mesh));
+
+    plater->take_snapshot("BumpMesh Undo Preview");
+    plater->clear_before_change_mesh(m_object_idx);
+
+    vol->set_mesh(indexed_triangle_set(m_original_mesh));
     vol->calculate_convex_hull();
+    vol->invalidate_convex_hull_2d();
+    vol->set_new_unique_id();
     obj->invalidate_bounding_box();
+    obj->ensure_on_bed();
     plater->changed_mesh(m_object_idx);
+
+    // Force immediate viewport repaint
+    if (GLCanvas3D* canvas = plater->canvas3D()) {
+        canvas->set_as_dirty();
+        canvas->request_extra_frame();
+    }
+    wxYield();
 
     m_preview_applied = false;
     BOOST_LOG_TRIVIAL(info) << "BumpMesh: restored original mesh";
@@ -718,6 +733,8 @@ void BumpMeshDialog::apply_displacement_to_model(bool is_preview)
     if (m_preview_applied && m_has_original_mesh) {
         vol->set_mesh(indexed_triangle_set(m_original_mesh));
         vol->calculate_convex_hull();
+        vol->invalidate_convex_hull_2d();
+        vol->set_new_unique_id();
         obj->invalidate_bounding_box();
     }
 
@@ -817,15 +834,29 @@ void BumpMeshDialog::apply_displacement_to_model(bool is_preview)
         return;
     }
 
-    // Replace the volume's mesh
+    // Take undo/redo snapshot before modifying the mesh
+    plater->take_snapshot(is_preview ? "BumpMesh Preview" : "BumpMesh Apply Texture");
+    plater->clear_before_change_mesh(m_object_idx);
+
+    // Replace the volume's mesh (same pattern as GLGizmoSimplify)
     TriangleMesh new_mesh(std::move(displaced));
 
     vol->set_mesh(std::move(new_mesh));
     vol->calculate_convex_hull();
+    vol->invalidate_convex_hull_2d();
+    vol->set_new_unique_id();
     obj->invalidate_bounding_box();
+    obj->ensure_on_bed();
 
     // Notify plater to refresh 3D viewport
     plater->changed_mesh(m_object_idx);
+
+    // Force the 3D canvas to repaint while our modal dialog is open
+    if (GLCanvas3D* canvas = plater->canvas3D()) {
+        canvas->set_as_dirty();
+        canvas->request_extra_frame();
+    }
+    wxYield();
 
     m_preview_applied = is_preview;
 
