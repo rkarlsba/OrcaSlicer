@@ -18,6 +18,8 @@
 #include "PartPlate.hpp"
 #include "Gizmos/GLGizmoEmboss.hpp"
 #include "Gizmos/GLGizmoSVG.hpp"
+#include "BumpMeshDialog.hpp"
+#include "MainFrame.hpp"
 
 #include <boost/algorithm/string.hpp>
 #include "slic3r/GUI/Tab.hpp"
@@ -1384,6 +1386,19 @@ void MenuFactory::create_extra_object_menu()
     append_menu_item_simplify(&m_object_menu);
     // Object Mesh Subdivision
     append_menu_item_smooth_mesh(&m_object_menu);
+    // BumpMesh Texture
+    append_menu_item(&m_object_menu, wxID_ANY, _L("Apply BumpMesh Texture..."),
+        _L("Apply a displacement texture to the selected object"),
+        [](wxCommandEvent&) {
+            auto& selection = plater()->get_view3D_canvas3D()->get_selection();
+            int obj_idx = selection.get_object_idx();
+            if (obj_idx >= 0) {
+                BumpMeshDialog dlg(wxGetApp().mainframe, obj_idx);
+                dlg.ShowModal();
+            }
+        }, "", &m_object_menu,
+        []() { return plater()->get_view3D_canvas3D()->get_selection().get_object_idx() >= 0; },
+        m_parent);
     // merge to single part
     append_menu_item_merge_parts_to_single_part(&m_object_menu);
     // Object Center

@@ -47,6 +47,7 @@
 #include "BindDialog.hpp"
 #include "../Utils/MacDarkMode.hpp"
 #include "libslic3r/Plugin/PluginHost.hpp"
+#include "PluginManagerDialog.hpp"
 
 #include <fstream>
 #include <string_view>
@@ -3505,8 +3506,8 @@ void MainFrame::rebuild_plugin_menu()
     // Add Plugin Manager item at the top
     append_menu_item(m_plugin_menu, wxID_ANY, _L("Manage Plugins..."), _L("Open the plugin manager"),
         [this](wxCommandEvent&) {
-            // TODO: Open PluginManagerDialog
-            wxMessageBox(_L("Plugin Manager will be implemented"), _L("Plugins"), wxOK | wxICON_INFORMATION, this);
+            PluginManagerDialog dlg(this);
+            dlg.ShowModal();
         });
     
     m_plugin_menu->AppendSeparator();

@@ -14,9 +14,22 @@
 #include <fstream>
 #include <sstream>
 #include <algorithm>
+#include <chrono>
+#include <ctime>
 
 // JSON parsing (using nlohmann/json already in deps)
 #include <nlohmann/json.hpp>
+
+// Timestamped stderr log helper
+#define PLUGIN_LOG(fmt, ...) do { \
+    auto _now = std::chrono::system_clock::now(); \
+    auto _tt  = std::chrono::system_clock::to_time_t(_now); \
+    auto _ms  = std::chrono::duration_cast<std::chrono::milliseconds>( \
+                    _now.time_since_epoch()) % 1000; \
+    struct tm _tm; localtime_r(&_tt, &_tm); \
+    fprintf(stderr, "[%02d:%02d:%02d.%03d][Plugin] " fmt "\n", \
+            _tm.tm_hour, _tm.tm_min, _tm.tm_sec, (int)_ms.count(), ##__VA_ARGS__); \
+} while(0)
 
 namespace Slic3r {
 namespace Plugin {
@@ -68,16 +81,16 @@ void PluginHost::initialize(GUI::Plater* plater, GUI::Worker* worker) {
     auto node_runtime = std::make_shared<NodePluginRuntime>();
     auto host_script = std::filesystem::path(resources_dir()) / "plugins" / "node-host" / "index.js";
     node_runtime->set_host_script_path(host_script);
-    fprintf(stderr, "[Plugin] host_script=%s exists=%d\n",
+    PLUGIN_LOG("host_script=%s exists=%d",
             host_script.c_str(), (int)std::filesystem::exists(host_script));
     if (node_runtime->initialize()) {
         m_runtimes[PluginType::JavaScript] = node_runtime;
-        fprintf(stderr, "[Plugin] Node.js runtime initialized, version: %s\n",
+        PLUGIN_LOG("Node.js runtime initialized, version: %s",
                 node_runtime->version().c_str());
         BOOST_LOG_TRIVIAL(info) << "Plugin: Node.js runtime initialized, version: "
                                 << node_runtime->version();
     } else {
-        fprintf(stderr, "[Plugin] Node.js runtime unavailable (node not installed or host script missing)\n");
+        PLUGIN_LOG("Node.js runtime unavailable (node not installed or host script missing)");
         BOOST_LOG_TRIVIAL(warning) << "Plugin: Node.js runtime unavailable (node not installed or host script missing)";
     }
     
@@ -93,7 +106,7 @@ void PluginHost::initialize(GUI::Plater* plater, GUI::Worker* worker) {
     
     m_initialized = true;
     
-    fprintf(stderr, "[Plugin] Host initialized, %zu plugin(s) discovered\n", m_plugins.size());
+    PLUGIN_LOG("Host initialized, %zu plugin(s) discovered", m_plugins.size());
     BOOST_LOG_TRIVIAL(info) << "Plugin: Host initialized with " << m_plugins.size() << " plugins discovered";
     
     // Note: Plugins will be loaded lazily or on demand, not during startup
@@ -129,9 +142,9 @@ void PluginHost::shutdown() {
     
     for (auto& [id, instance] : to_unload) {
         try {
-            fprintf(stderr, "[Plugin] PluginHost unloading %s...\n", id.c_str());
+            PLUGIN_LOG("PluginHost unloading %s...", id.c_str());
             instance->on_unload();
-            fprintf(stderr, "[Plugin] PluginHost unloaded %s\n", id.c_str());
+            PLUGIN_LOG("PluginHost unloaded %s", id.c_str());
         } catch (const std::exception& e) {
             BOOST_LOG_TRIVIAL(error) << "Plugin: Error unloading " << id << ": " << e.what();
         }
@@ -377,7 +390,7 @@ bool PluginHost::load_plugin(const std::string& plugin_id) {
     
     // Load plugin
     info.state = PluginState::Loading;
-    fprintf(stderr, "[Plugin] Loading %s\n", plugin_id.c_str());
+    PLUGIN_LOG("Loading %s", plugin_id.c_str());
     BOOST_LOG_TRIVIAL(info) << "Plugin: Loading " << plugin_id;
     
     try {
@@ -427,7 +440,7 @@ bool PluginHost::load_plugin(const std::string& plugin_id) {
         
         info2.state = PluginState::Loaded;
         info2.error_message.clear();
-        fprintf(stderr, "[Plugin] %s loaded successfully\n", plugin_id.c_str());
+        PLUGIN_LOG("%s loaded successfully", plugin_id.c_str());
         BOOST_LOG_TRIVIAL(info) << "Plugin: Loaded " << plugin_id << " successfully";
         // Now that state == Loaded, menu registrations will be visible — trigger rebuild
         if (m_menu_changed_callback) m_menu_changed_callback();
@@ -836,7 +849,7 @@ bool PluginHost::register_plugin_submenu(const std::string& plugin_id, const Sub
     
     // Add new submenu
     reg.submenus.push_back(submenu);
-    fprintf(stderr, "[Plugin] %s registered submenu: %s\n", plugin_id.c_str(), submenu.label.c_str());
+    PLUGIN_LOG("%s registered submenu: %s", plugin_id.c_str(), submenu.label.c_str());
     BOOST_LOG_TRIVIAL(debug) << "Plugin " << plugin_id << " registered submenu: " << submenu.label;
     
     if (m_menu_changed_callback) m_menu_changed_callback();
@@ -884,7 +897,7 @@ bool PluginHost::register_plugin_menu_item(const std::string& plugin_id, const M
     
     // Add new item
     reg.items.push_back(item);
-    fprintf(stderr, "[Plugin] %s registered menu item: %s (submenu: %s)\n",
+    PLUGIN_LOG("%s registered menu item: %s (submenu: %s)",
             plugin_id.c_str(), item.label.c_str(), item.submenu_id.c_str());
     BOOST_LOG_TRIVIAL(debug) << "Plugin " << plugin_id << " registered menu item: " << item.label;
     

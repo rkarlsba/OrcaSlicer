@@ -17,6 +17,19 @@
 
 #include <fstream>
 #include <sstream>
+#include <chrono>
+#include <ctime>
+
+// Timestamped stderr log helper
+#define PLUGIN_LOG(fmt, ...) do { \
+    auto _now = std::chrono::system_clock::now(); \
+    auto _tt  = std::chrono::system_clock::to_time_t(_now); \
+    auto _ms  = std::chrono::duration_cast<std::chrono::milliseconds>( \
+                    _now.time_since_epoch()) % 1000; \
+    struct tm _tm; localtime_r(&_tt, &_tm); \
+    fprintf(stderr, "[%02d:%02d:%02d.%03d][Plugin] " fmt "\n", \
+            _tm.tm_hour, _tm.tm_min, _tm.tm_sec, (int)_ms.count(), ##__VA_ARGS__); \
+} while(0)
 
 namespace {
 // Base64 encoding helper
@@ -120,7 +133,7 @@ void NodePluginInstance::on_unload()
 {
     if (m_ipc && m_ipc->is_connected()) {
         try {
-            m_ipc->call("unloadPlugin", JsonValue());
+            m_ipc->call("unloadPlugin", JsonValue(), 3000); // 3s timeout during shutdown
         } catch (...) {
             // Ignore errors during unload
         }
@@ -529,19 +542,17 @@ void NodePluginRuntime::shutdown()
 {
     if (!m_initialized) return;
     
-    fprintf(stderr, "[Plugin] NodePluginRuntime::shutdown start\n");
+    PLUGIN_LOG("NodePluginRuntime::shutdown start");
     
-    // Unload all plugins
-    for (auto& [id, plugin] : m_plugins) {
-        fprintf(stderr, "[Plugin] on_unload(%s) start\n", id.c_str());
-        plugin->on_unload();
-        fprintf(stderr, "[Plugin] on_unload(%s) done\n", id.c_str());
-    }
+    // Note: PluginHost::shutdown() already called on_unload() on each plugin
+    // instance before calling runtime->shutdown(). We must NOT call on_unload()
+    // again here — it would send another IPC call to a potentially-dead node
+    // process and block for the full 30s timeout.
     m_plugins.clear();
     
-    fprintf(stderr, "[Plugin] clearing plugin_clients (%zu)\n", m_plugin_clients.size());
+    PLUGIN_LOG("clearing plugin_clients (%zu)", m_plugin_clients.size());
     m_plugin_clients.clear();
-    fprintf(stderr, "[Plugin] plugin_clients cleared\n");
+    PLUGIN_LOG("plugin_clients cleared");
     
     // Stop Node.js process
     stop_node_process();
@@ -552,7 +563,7 @@ void NodePluginRuntime::shutdown()
     }
     
     m_initialized = false;
-    fprintf(stderr, "[Plugin] NodePluginRuntime::shutdown complete\n");
+    PLUGIN_LOG("NodePluginRuntime::shutdown complete");
 }
 
 bool NodePluginRuntime::is_available() const
@@ -1188,9 +1199,9 @@ void IPCClient::stop()
     }
     
     if (m_message_thread.joinable()) {
-        fprintf(stderr, "[Plugin] IPCClient::stop joining message thread...\n");
+        PLUGIN_LOG("IPCClient::stop joining message thread...");
         m_message_thread.join();
-        fprintf(stderr, "[Plugin] IPCClient::stop message thread joined\n");
+        PLUGIN_LOG("IPCClient::stop message thread joined");
     }
 }
 
