@@ -11,12 +11,16 @@
 #include "Widgets/CheckBox.hpp"
 
 #include "libslic3r/Plugin/PluginHost.hpp"
+#include "libslic3r/Utils.hpp"
 
 #include <wx/statbox.h>
 #include <wx/checkbox.h>
 #include <wx/wrapsizer.h>
 #include <wx/filedlg.h>
 #include <wx/dcmemory.h>
+#include <wx/busycursor.h>
+#include <wx/image.h>
+#include <wx/filename.h>
 
 namespace Slic3r {
 namespace GUI {
@@ -106,94 +110,70 @@ void BumpMeshDialog::on_dpi_changed(const wxRect& suggested_rect)
     Layout();
 }
 
-// Procedurally generated placeholder thumbnails
+// Load texture thumbnails from the bumpmesh plugin's textures directory
 void BumpMeshDialog::populate_textures()
 {
-    // These match the texture names from the bumpmesh plugin
-    const std::vector<std::pair<std::string, std::string>> tex_list = {
-        {"basket_weave",  "Basket Weave"},
-        {"brick",         "Brick"},
-        {"bubble",        "Bubble"},
-        {"carbon_fiber",  "Carbon Fiber"},
-        {"crystal",       "Crystal"},
-        {"dots",          "Dots"},
-        {"grid",          "Grid"},
-        {"grip_surface",  "Grip Surface"},
-        {"hexagon",       "Hexagon"},
-        {"hexagons",      "Hexagons"},
-        {"isogrid",       "Isogrid"},
-        {"knitting",      "Knitting"},
-        {"knurling",      "Knurling"},
-        {"leather",       "Leather"},
-        {"leather_2",     "Leather 2"},
-        {"noise",         "Noise"},
-        {"stripes",       "Stripes"},
-        {"stripes_2",     "Stripes 2"},
-        {"voronoi",       "Voronoi"},
-        {"weave",         "Weave"},
-        {"weave_2",       "Weave 2"},
-        {"weave_3",       "Weave 3"},
-        {"wood",          "Wood"},
-        {"woodgrain_2",   "Woodgrain 2"},
-        {"woodgrain_3",   "Woodgrain 3"},
+    // IDs and files must match the plugin's BUILTIN_TEXTURES array in bumpmesh/index.js
+    struct TexDef { const char* id; const char* name; const char* file; };
+    static const TexDef tex_list[] = {
+        {"basket",       "Basket Weave",  "basket.jpg"},
+        {"brick",        "Brick",         "brick.jpg"},
+        {"bubble",       "Bubble",        "bubble.jpg"},
+        {"carbonFiber",  "Carbon Fiber",  "carbonFiber.jpg"},
+        {"crystal",      "Crystal",       "crystal.jpg"},
+        {"dots",         "Dots",          "dots.jpg"},
+        {"grid",         "Grid",          "grid.png"},
+        {"gripSurface",  "Grip Surface",  "gripSurface.jpg"},
+        {"hexagon",      "Hexagon",       "hexagon.jpg"},
+        {"hexagons",     "Hexagons",      "hexagons.jpg"},
+        {"isogrid",      "Isogrid",       "isogrid.png"},
+        {"knitting",     "Knitting",      "knitting.jpg"},
+        {"knurling",     "Knurling",      "knurling.jpg"},
+        {"leather",      "Leather",       "leather.jpg"},
+        {"leather2",     "Leather 2",     "leather2.jpg"},
+        {"noise",        "Noise",         "noise.jpg"},
+        {"stripes",      "Stripes",       "stripes.png"},
+        {"stripes_02",   "Stripes 2",     "stripes_02.png"},
+        {"voronoi",      "Voronoi",       "voronoi.jpg"},
+        {"weave",        "Weave",         "weave.jpg"},
+        {"weave_02",     "Weave 2",       "weave_02.jpg"},
+        {"weave_03",     "Weave 3",       "weave_03.jpg"},
+        {"wood",         "Wood",          "wood.jpg"},
+        {"woodgrain_02", "Woodgrain 2",   "woodgrain_02.jpg"},
+        {"woodgrain_03", "Woodgrain 3",   "woodgrain_03.jpg"},
     };
 
-    const int thumb_size = FromDIP(64);
-    for (const auto& [id, name] : tex_list) {
-        TextureInfo ti;
-        ti.id   = id;
-        ti.name = name;
+    // Resolve the textures directory in the app bundle
+    std::string tex_dir = Slic3r::resources_dir() + "/plugins/bumpmesh/textures";
 
-        // Create a simple procedural placeholder bitmap
-        wxBitmap bmp(thumb_size, thumb_size);
-        {
+    const int thumb_size = FromDIP(64);
+    for (const auto& def : tex_list) {
+        TextureInfo ti;
+        ti.id   = def.id;
+        ti.name = def.name;
+        ti.file = def.file;
+
+        // Try to load actual texture image from disk
+        std::string img_path = tex_dir + "/" + def.file;
+        wxImage img;
+        if (wxFileExists(wxString::FromUTF8(img_path)) &&
+            img.LoadFile(wxString::FromUTF8(img_path))) {
+            // Convert to grayscale and scale to thumbnail
+            img = img.ConvertToGreyscale();
+            img.Rescale(thumb_size, thumb_size, wxIMAGE_QUALITY_HIGH);
+            ti.thumbnail = wxBitmap(img);
+        } else {
+            // Fallback: plain gray placeholder
+            wxBitmap bmp(thumb_size, thumb_size);
             wxMemoryDC dc(bmp);
-            // Use a hash of the id to generate a distinct colour pattern
-            unsigned h = 0;
-            for (char c : id) h = h * 31 + c;
-            int r = 120 + (h % 80);
-            int g = 120 + ((h / 80) % 80);
-            int b = 120 + ((h / 6400) % 80);
-            dc.SetBrush(wxBrush(wxColour(r, g, b)));
+            dc.SetBrush(wxBrush(wxColour(180, 180, 180)));
             dc.SetPen(*wxTRANSPARENT_PEN);
             dc.DrawRectangle(0, 0, thumb_size, thumb_size);
-
-            // Draw a simple pattern based on id hash
-            dc.SetPen(wxPen(wxColour(r - 40, g - 40, b - 40), 1));
-            int pattern = h % 5;
-            switch (pattern) {
-            case 0: // grid
-                for (int i = 0; i < thumb_size; i += 8) {
-                    dc.DrawLine(i, 0, i, thumb_size);
-                    dc.DrawLine(0, i, thumb_size, i);
-                }
-                break;
-            case 1: // diagonal
-                for (int i = -thumb_size; i < thumb_size * 2; i += 8) {
-                    dc.DrawLine(i, 0, i + thumb_size, thumb_size);
-                }
-                break;
-            case 2: // dots
-                for (int x = 4; x < thumb_size; x += 10)
-                    for (int y = 4; y < thumb_size; y += 10)
-                        dc.DrawCircle(x, y, 3);
-                break;
-            case 3: // hexagons (simplified)
-                for (int x = 0; x < thumb_size; x += 12)
-                    for (int y = 0; y < thumb_size; y += 10)
-                        dc.DrawCircle(x + (y / 10 % 2) * 6, y, 5);
-                break;
-            default: // horizontal lines
-                for (int i = 0; i < thumb_size; i += 6)
-                    dc.DrawLine(0, i, thumb_size, i);
-                break;
-            }
-
-            // Label
-            dc.SetTextForeground(*wxWHITE);
-            dc.SetFont(wxFont(7, wxFONTFAMILY_SWISS, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_BOLD));
+            dc.SetTextForeground(wxColour(100, 100, 100));
+            dc.SetFont(wxFont(8, wxFONTFAMILY_SWISS, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_NORMAL));
+            dc.DrawText("?", thumb_size / 2 - 3, thumb_size / 2 - 5);
+            ti.thumbnail = bmp;
         }
-        ti.thumbnail = bmp;
         m_textures.push_back(std::move(ti));
     }
 }
@@ -270,29 +250,58 @@ wxPanel* BumpMeshDialog::create_displacement_section(wxWindow* parent)
     title->SetFont(Label::Head_14);
     sizer->Add(title, 0, wxBOTTOM, FromDIP(6));
 
-    // Texture thumbnail grid (scrolled, wrapping)
+    // Texture thumbnail grid (scrolled, grid layout with fixed columns)
     m_texture_grid = new wxScrolledWindow(panel, wxID_ANY, wxDefaultPosition,
-                                          wxSize(-1, FromDIP(200)),
+                                          wxSize(-1, FromDIP(220)),
                                           wxVSCROLL | wxBORDER_SIMPLE);
     m_texture_grid->SetScrollRate(0, FromDIP(10));
-    m_texture_grid->SetBackgroundColour(wxColour(245, 245, 245));
-
-    auto* grid_sizer = new wxWrapSizer(wxHORIZONTAL);
+    m_texture_grid->SetBackgroundColour(wxColour(240, 240, 240));
 
     const int btn_size = FromDIP(72);
-    for (const auto& ti : m_textures) {
+    const int cols = 6;
+    auto* grid_sizer = new wxGridSizer(cols, FromDIP(4), FromDIP(4));
+
+    m_texture_buttons.clear();
+    for (size_t i = 0; i < m_textures.size(); ++i) {
+        const auto& ti = m_textures[i];
         auto* btn = new wxBitmapButton(m_texture_grid, wxID_ANY, ti.thumbnail,
-                                       wxDefaultPosition, wxSize(btn_size, btn_size));
+                                       wxDefaultPosition, wxSize(btn_size, btn_size),
+                                       wxBORDER_SIMPLE);
         btn->SetToolTip(wxString::FromUTF8(ti.name));
         std::string tex_id = ti.id;
         btn->Bind(wxEVT_BUTTON, [this, tex_id](wxCommandEvent&) {
             on_texture_selected(tex_id);
         });
-        grid_sizer->Add(btn, 0, wxALL, FromDIP(2));
+        grid_sizer->Add(btn, 0, wxALL, 0);
+        m_texture_buttons.push_back(btn);
     }
 
     m_texture_grid->SetSizer(grid_sizer);
+    grid_sizer->FitInside(m_texture_grid);
     sizer->Add(m_texture_grid, 0, wxEXPAND | wxBOTTOM, FromDIP(6));
+
+    // Selected texture label
+    m_selected_label = new wxStaticText(panel, wxID_ANY, _L("No texture selected"));
+    m_selected_label->SetForegroundColour(wxColour(80, 80, 80));
+    sizer->Add(m_selected_label, 0, wxBOTTOM, FromDIP(4));
+
+    // Preview image (larger view of selected texture)
+    const int preview_size = FromDIP(200);
+    wxBitmap empty_preview(preview_size, preview_size);
+    {
+        wxMemoryDC dc(empty_preview);
+        dc.SetBrush(wxBrush(wxColour(220, 220, 220)));
+        dc.SetPen(wxPen(wxColour(180, 180, 180), 1, wxPENSTYLE_DOT));
+        dc.DrawRectangle(0, 0, preview_size, preview_size);
+        dc.SetTextForeground(wxColour(140, 140, 140));
+        dc.SetFont(wxFont(11, wxFONTFAMILY_SWISS, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_NORMAL));
+        wxString hint = _L("Select a texture above");
+        wxSize ts = dc.GetTextExtent(hint);
+        dc.DrawText(hint, (preview_size - ts.x) / 2, (preview_size - ts.y) / 2);
+    }
+    m_preview_image = new wxStaticBitmap(panel, wxID_ANY, empty_preview,
+                                         wxDefaultPosition, wxSize(preview_size, preview_size));
+    sizer->Add(m_preview_image, 0, wxALIGN_CENTER_HORIZONTAL | wxBOTTOM, FromDIP(6));
 
     // Upload custom map button
     auto* custom_btn = new Button(panel, _L("Upload Custom Map..."));
@@ -632,9 +641,69 @@ void BumpMeshDialog::on_texture_selected(const std::string& id)
 {
     m_settings.texture_id = id;
 
-    // Highlight selected thumbnail (simple approach: update tooltip)
-    // TODO: Add visual selection indicator (border highlight)
+    // Find the matching texture name for the label
+    std::string selected_name;
+    size_t selected_idx = SIZE_MAX;
+    for (size_t i = 0; i < m_textures.size(); ++i) {
+        if (m_textures[i].id == id) {
+            selected_name = m_textures[i].name;
+            selected_idx = i;
+            break;
+        }
+    }
+
+    // Update "Selected:" label
+    if (m_selected_label) {
+        if (selected_name.empty())
+            m_selected_label->SetLabel(_L("Selected: ") + wxString::FromUTF8(id));
+        else
+            m_selected_label->SetLabel(_L("Selected: ") + wxString::FromUTF8(selected_name));
+    }
+
+    // Highlight the selected button, reset others
+    for (size_t i = 0; i < m_texture_buttons.size(); ++i) {
+        if (i == selected_idx) {
+            m_texture_buttons[i]->SetBackgroundColour(wxColour(0, 120, 215));
+            m_selected_btn = m_texture_buttons[i];
+        } else {
+            m_texture_buttons[i]->SetBackgroundColour(wxColour(240, 240, 240));
+        }
+        m_texture_buttons[i]->Refresh();
+    }
+
+    // Update the large preview image
+    update_preview();
+
     BOOST_LOG_TRIVIAL(info) << "BumpMesh: selected texture " << id;
+}
+
+void BumpMeshDialog::update_preview()
+{
+    if (!m_preview_image) return;
+
+    const int preview_size = FromDIP(200);
+
+    // Find the selected texture and load a larger version for preview
+    for (const auto& ti : m_textures) {
+        if (ti.id == m_settings.texture_id) {
+            std::string tex_dir = Slic3r::resources_dir() + "/plugins/bumpmesh/textures";
+            std::string img_path = tex_dir + "/" + ti.file;
+            wxImage img;
+            if (!ti.file.empty() && wxFileExists(wxString::FromUTF8(img_path)) &&
+                img.LoadFile(wxString::FromUTF8(img_path))) {
+                img = img.ConvertToGreyscale();
+                img.Rescale(preview_size, preview_size, wxIMAGE_QUALITY_HIGH);
+                m_preview_image->SetBitmap(wxBitmap(img));
+            } else {
+                // Use the thumbnail scaled up
+                wxImage thumb = ti.thumbnail.ConvertToImage();
+                thumb.Rescale(preview_size, preview_size, wxIMAGE_QUALITY_NEAREST);
+                m_preview_image->SetBitmap(wxBitmap(thumb));
+            }
+            m_preview_image->Refresh();
+            return;
+        }
+    }
 }
 
 void BumpMeshDialog::on_custom_texture()
@@ -658,40 +727,43 @@ void BumpMeshDialog::on_apply(wxCommandEvent& evt)
         return;
     }
 
-    // Send settings to plugin via PluginHost
-    try {
-        nlohmann::json params;
-        params["object_idx"]           = m_object_idx;
-        params["texture_id"]           = m_settings.texture_id;
-        params["texture_smoothing"]    = m_settings.texture_smoothing;
-        params["projection_mode"]      = m_settings.projection_mode;
-        params["transition_smoothing"] = m_settings.transition_smoothing;
-        params["amplitude"]            = m_settings.amplitude;
-        params["boundary_falloff"]     = m_settings.boundary_falloff;
-        params["symmetric"]            = m_settings.symmetric;
-        params["preview_3d"]           = m_settings.preview_3d;
-        params["scale_u"]              = m_settings.scale_u;
-        params["scale_v"]              = m_settings.scale_v;
-        params["offset_u"]             = m_settings.offset_u;
-        params["offset_v"]             = m_settings.offset_v;
-        params["rotation"]             = m_settings.rotation;
-        params["bottom_faces"]         = m_settings.bottom_faces;
-        params["top_faces"]            = m_settings.top_faces;
-        params["mask_mode"]            = m_settings.mask_mode;
-        params["mask_tool"]            = m_settings.mask_tool;
-        params["max_angle"]            = m_settings.max_angle;
-        params["resolution"]           = m_settings.resolution;
-        params["output_triangles"]     = m_settings.output_triangles;
+    // Log the settings for debugging
+    BOOST_LOG_TRIVIAL(info) << "BumpMesh: applying texture '" << m_settings.texture_id
+                            << "' to object " << m_object_idx
+                            << " (amplitude=" << m_settings.amplitude
+                            << ", scale_u=" << m_settings.scale_u
+                            << ", scale_v=" << m_settings.scale_v
+                            << ", projection=" << m_settings.projection_mode << ")";
 
-        Plugin::plugin_host().handle_menu_click("@orcaslicer/bumpmesh",
-                                                m_settings.texture_id);
-        BOOST_LOG_TRIVIAL(info) << "BumpMesh: applied texture " << m_settings.texture_id
-                                << " to object " << m_object_idx;
-    } catch (const std::exception& e) {
-        wxMessageBox(wxString::Format(_L("Failed to apply texture: %s"),
-                                      wxString::FromUTF8(e.what())),
-                     _L("BumpMesh"), wxOK | wxICON_ERROR, this);
+    // Find the texture name for display
+    std::string tex_name = m_settings.texture_id;
+    for (const auto& ti : m_textures) {
+        if (ti.id == m_settings.texture_id) {
+            tex_name = ti.name;
+            break;
+        }
     }
+
+    // The plugin mesh SDK (getMesh/setMesh) is not yet implemented in the
+    // host-side IPC layer, so we cannot process mesh data through the plugin.
+    // Show an informational message with the selected settings.
+    wxString msg = wxString::Format(
+        _L("Texture: %s\n"
+           "Object index: %d\n"
+           "Amplitude: %.2f\n"
+           "Scale: %.2f x %.2f\n"
+           "Projection mode: %d\n\n"
+           "Mesh displacement processing via the plugin SDK is not yet "
+           "implemented. The settings have been recorded and will be applied "
+           "once the mesh processing pipeline is connected."),
+        wxString::FromUTF8(tex_name),
+        m_object_idx,
+        m_settings.amplitude,
+        m_settings.scale_u, m_settings.scale_v,
+        m_settings.projection_mode);
+
+    wxMessageBox(msg, _L("BumpMesh — Settings Recorded"),
+                 wxOK | wxICON_INFORMATION, this);
 }
 
 void BumpMeshDialog::on_close(wxCommandEvent& evt)

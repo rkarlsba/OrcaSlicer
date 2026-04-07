@@ -223,7 +223,9 @@ public:
     std::vector<MenuItemInfo> get_plugin_menu_items(const std::string& plugin_id) const;
     
     // Handle menu click - dispatches to the appropriate plugin
-    void handle_menu_click(const std::string& plugin_id, const std::string& item_id);
+    // If callback_data_override is non-empty, it is used instead of the registered item's callback_data
+    void handle_menu_click(const std::string& plugin_id, const std::string& item_id,
+                           const std::string& callback_data_override = "");
     
     // Set callback for when menu registrations change (GUI rebuilds menu)
     void set_menu_changed_callback(std::function<void()> callback);

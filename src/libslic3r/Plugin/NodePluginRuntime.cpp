@@ -372,8 +372,8 @@ void NodePluginInstance::on_menu_click(PluginContext* ctx, const MenuEvent& even
         params["callbackData"] = event.callback_data;
         params["isChecked"] = event.is_checked;
         
-        // Call the plugin's menuClick handler
-        auto result = m_ipc->call("menuClick", JsonValue(params.dump()), 30000);
+        // Call the plugin's menuClick handler (5s timeout — mesh processing needs async support)
+        auto result = m_ipc->call("menuClick", JsonValue(params.dump()), 5000);
         
         // Result is ignored - menu clicks are typically fire-and-forget
     } catch (const std::exception& e) {

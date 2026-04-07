@@ -3492,23 +3492,19 @@ void MainFrame::rebuild_plugin_menu()
         m_plugin_menu->Delete(m_plugin_menu->FindItemByPosition(0));
     }
     
-    // Get all plugin menu registrations
-    auto& host = Plugin::plugin_host();
-    auto registrations = host.get_all_menu_registrations();
-    
-    if (registrations.empty()) {
-        // Add a placeholder when no plugins have registered menus
-        auto* item = m_plugin_menu->Append(wxID_ANY, _L("No plugin menus registered"));
-        item->Enable(false);
-        return;
-    }
-    
-    // Add Plugin Manager item at the top
+    // Always add Plugin Manager item at the top
     append_menu_item(m_plugin_menu, wxID_ANY, _L("Manage Plugins..."), _L("Open the plugin manager"),
         [this](wxCommandEvent&) {
             PluginManagerDialog dlg(this);
             dlg.ShowModal();
         });
+    
+    // Get all plugin menu registrations
+    auto& host = Plugin::plugin_host();
+    auto registrations = host.get_all_menu_registrations();
+    
+    if (registrations.empty())
+        return;
     
     m_plugin_menu->AppendSeparator();
     

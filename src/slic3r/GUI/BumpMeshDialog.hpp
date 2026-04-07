@@ -18,6 +18,7 @@
 #include <wx/tglbtn.h>
 #include <wx/wrapsizer.h>
 #include <wx/bmpbuttn.h>
+#include <wx/statbmp.h>
 
 #include <string>
 #include <vector>
@@ -30,7 +31,8 @@ namespace GUI {
 struct TextureInfo {
     std::string id;
     std::string name;
-    wxBitmap    thumbnail;  // Will be generated procedurally or loaded
+    std::string file;       // Filename in the textures directory
+    wxBitmap    thumbnail;  // 64x64 thumbnail loaded from disk
 };
 
 //==============================================================================
@@ -132,6 +134,7 @@ private:
 
     void populate_textures();
     void on_texture_selected(const std::string& id);
+    void update_preview();
     void on_custom_texture();
     void on_apply(wxCommandEvent& evt);
     void on_close(wxCommandEvent& evt);
@@ -142,6 +145,12 @@ private:
     // Texture thumbnails panel
     wxScrolledWindow* m_texture_grid = nullptr;
     std::vector<TextureInfo> m_textures;
+    wxStaticText* m_selected_label = nullptr;
+    wxBitmapButton* m_selected_btn = nullptr;
+    std::vector<wxBitmapButton*> m_texture_buttons;
+
+    // Preview panel
+    wxStaticBitmap* m_preview_image = nullptr;
 
     // Lock-UV toggle
     bool m_lock_uv = true;

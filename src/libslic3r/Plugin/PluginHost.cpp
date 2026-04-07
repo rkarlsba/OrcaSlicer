@@ -967,7 +967,8 @@ std::vector<MenuItemInfo> PluginHost::get_plugin_menu_items(const std::string& p
     return it->second.items;
 }
 
-void PluginHost::handle_menu_click(const std::string& plugin_id, const std::string& item_id) {
+void PluginHost::handle_menu_click(const std::string& plugin_id, const std::string& item_id,
+                                   const std::string& callback_data_override) {
     // Find the plugin
     std::shared_ptr<IPlugin> plugin_instance;
     MenuItemInfo clicked_item;
@@ -1003,7 +1004,7 @@ void PluginHost::handle_menu_click(const std::string& plugin_id, const std::stri
     
     MenuEvent event;
     event.item_id = item_id;
-    event.callback_data = clicked_item.callback_data;
+    event.callback_data = callback_data_override.empty() ? clicked_item.callback_data : callback_data_override;
     event.is_checked = has_flag(clicked_item.flags, MenuItemFlags::Checked);
     
     BOOST_LOG_TRIVIAL(debug) << "Plugin menu click: " << plugin_id << " / " << item_id;

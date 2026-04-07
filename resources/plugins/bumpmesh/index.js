@@ -93,46 +93,16 @@ class BumpMeshPlugin {
     }
     
     /**
-     * Register texture menu items
+     * Register the menu click handler (no top-level menu items — 
+     * BumpMesh is accessed via right-click on objects only)
      */
     async _registerMenuItems(sdk) {
         try {
-            // Register BumpMesh submenu
-            await sdk.registerSubmenu({
-                id: 'bumpmesh',
-                label: 'BumpMesh Textures',
-                order: 0
-            });
-            sdk.log('Registered BumpMesh submenu');
-            
-            // Register each built-in texture as a menu item
-            for (let i = 0; i < BUILTIN_TEXTURES.length; i++) {
-                const tex = BUILTIN_TEXTURES[i];
-                await sdk.registerMenuItem({
-                    id: `texture_${tex.id}`,
-                    submenuId: 'bumpmesh',
-                    label: tex.label,
-                    callbackData: JSON.stringify({ action: 'applyTexture', textureId: tex.id }),
-                    order: i
-                });
-            }
-            sdk.log(`Registered ${BUILTIN_TEXTURES.length} texture menu items`);
-            
-            // Add separator and custom texture option
-            await sdk.registerMenuItem({
-                id: 'custom_texture',
-                submenuId: 'bumpmesh',
-                label: 'Open Custom Texture...',
-                callbackData: JSON.stringify({ action: 'customTexture' }),
-                order: BUILTIN_TEXTURES.length + 1
-            });
-            sdk.log('Registered custom texture menu item');
-            
-            // Register menu click handler
+            // Register menu click handler so the BumpMesh dialog can invoke us
             sdk._setMenuClickHandler(this.onMenuClick.bind(this));
-            
+            sdk.log('Registered BumpMesh menu click handler (context menu only)');
         } catch (e) {
-            sdk.log('Error registering menu items: ' + e.message);
+            sdk.log('Error registering menu handler: ' + e.message);
         }
     }
     
