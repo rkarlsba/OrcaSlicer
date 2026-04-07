@@ -1393,8 +1393,8 @@ void MenuFactory::create_extra_object_menu()
             auto& selection = plater()->get_view3D_canvas3D()->get_selection();
             int obj_idx = selection.get_object_idx();
             if (obj_idx >= 0) {
-                BumpMeshDialog dlg(wxGetApp().mainframe, obj_idx);
-                dlg.ShowModal();
+                auto* dlg = new BumpMeshDialog(wxGetApp().mainframe, obj_idx);
+                dlg->Show();
             }
         }, "", &m_object_menu,
         []() { return plater()->get_view3D_canvas3D()->get_selection().get_object_idx() >= 0; },

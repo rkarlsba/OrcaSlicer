@@ -99,7 +99,7 @@ void FloatSlider::update_label()
 BumpMeshDialog::BumpMeshDialog(wxWindow* parent, int object_idx)
     : DPIDialog(parent, wxID_ANY, _L("BumpMesh Textures"),
                 wxDefaultPosition, wxSize(FromDIP(520), FromDIP(780)),
-                wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER)
+                wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER | wxSTAY_ON_TOP)
     , m_object_idx(object_idx)
 {
     SetBackgroundColour(*wxWHITE);
@@ -107,6 +107,12 @@ BumpMeshDialog::BumpMeshDialog(wxWindow* parent, int object_idx)
     build_ui();
     CenterOnParent();
     wxGetApp().UpdateDlgDarkUI(this);
+
+    // Handle the X (close) button on the title bar
+    Bind(wxEVT_CLOSE_WINDOW, [this](wxCloseEvent& evt) {
+        wxCommandEvent dummy;
+        on_close(dummy);
+    });
 }
 
 void BumpMeshDialog::on_dpi_changed(const wxRect& suggested_rect)
@@ -955,8 +961,10 @@ void BumpMeshDialog::on_apply(wxCommandEvent& evt)
 {
     apply_displacement_to_model(false);
     // Close the dialog after successful final apply
-    if (m_has_original_mesh)
-        EndModal(wxID_OK);
+    if (m_has_original_mesh) {
+        Close();
+        Destroy();
+    }
 }
 
 void BumpMeshDialog::on_close(wxCommandEvent& evt)
@@ -973,7 +981,8 @@ void BumpMeshDialog::on_close(wxCommandEvent& evt)
         if (answer == wxNO)
             restore_original_mesh();
     }
-    EndModal(wxID_CANCEL);
+    Close();
+    Destroy();
 }
 
 } // namespace GUI
