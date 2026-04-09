@@ -89,6 +89,8 @@
 #include "../Utils/UndoRedo.hpp"
 #include "slic3r/Config/Snapshot.hpp"
 #include "Preferences.hpp"
+#include "PluginManagerDialog.hpp"
+#include "libslic3r/Plugin/PluginHost.hpp"
 #include "Tab.hpp"
 #include "SysInfoDialog.hpp"
 #include "UpdateDialogs.hpp"
@@ -1110,6 +1112,11 @@ GUI_App::GUI_App()
 void GUI_App::shutdown()
 {
     BOOST_LOG_TRIVIAL(info) << "GUI_App::shutdown enter";
+
+    // Shut down the plugin host while boost::log is still alive.
+    // Without this, s_plugin_host's static destructor fires after boost::log
+    // has been torn down, causing a null-deref crash in BOOST_LOG_TRIVIAL.
+    Plugin::plugin_host().shutdown();
 
 	if (m_removable_drive_manager) {
 		removable_drive_manager()->shutdown();
@@ -3108,6 +3115,21 @@ bool GUI_App::on_init_inner()
     plater_->init_notification_manager();
 
     m_printhost_job_queue.reset(new PrintHostJobQueue(mainframe->printhost_queue_dlg()));
+
+    // Initialize the plugin system (discovery only, no loading yet)
+    BOOST_LOG_TRIVIAL(info) << "Initializing plugin system...";
+    Plugin::plugin_host().initialize(plater_, nullptr);
+    BOOST_LOG_TRIVIAL(info) << "Plugin system initialized";
+    
+    // Load plugins asynchronously after GUI is shown
+    CallAfter([this]() {
+        std::thread plugin_loader([]() {
+            BOOST_LOG_TRIVIAL(info) << "Loading enabled plugins in background...";
+            Plugin::plugin_host().load_all_enabled();
+            BOOST_LOG_TRIVIAL(info) << "Plugin loading complete";
+        });
+        plugin_loader.detach();
+    });
 
     if (is_gcode_viewer()) {
         mainframe->update_layout();
@@ -6858,6 +6880,12 @@ void GUI_App::open_preferences(size_t open_on_tab, const std::string& highlight_
 
     if (need_recreate_gui)
         recreate_GUI(_L("Changing application language"));
+}
+
+void GUI_App::open_plugin_manager()
+{
+    PluginManagerDialog dlg(mainframe);
+    dlg.ShowModal();
 }
 
 bool GUI_App::has_unsaved_preset_changes() const

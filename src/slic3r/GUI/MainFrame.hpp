@@ -107,6 +107,7 @@ class MainFrame : public DPIFrame
     wxMenuBar*  m_menubar{ nullptr };
     //wxMenu* publishMenu{ nullptr };
     wxMenu *    m_calib_menu{nullptr};
+    wxMenu *    m_plugin_menu{nullptr};
     bool        enable_multi_machine{ false };
 
 #if 0
@@ -283,6 +284,7 @@ public:
     void        register_win32_callbacks();
     void        init_menubar_as_editor();
     void        init_menubar_as_gcodeviewer();
+    void        rebuild_plugin_menu();
     void        update_menubar();
     // Open item in menu by menu and item name (in actual language)
     void        open_menubar_item(const wxString& menu_name,const wxString& item_name);

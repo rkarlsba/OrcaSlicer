@@ -46,6 +46,8 @@
 #include "Widgets/ProgressDialog.hpp"
 #include "BindDialog.hpp"
 #include "../Utils/MacDarkMode.hpp"
+#include "libslic3r/Plugin/PluginHost.hpp"
+#include "PluginManagerDialog.hpp"
 
 #include <fstream>
 #include <string_view>
@@ -3188,6 +3190,12 @@ void MainFrame::init_menubar_as_editor()
             wxGetApp().open_preferences();
         },
         "", nullptr, []() { return true; }, this, 1);
+    append_menu_item(
+        parent_menu, wxID_ANY, _L("Plugin Manager"), "",
+        [this](wxCommandEvent &) {
+            wxGetApp().open_plugin_manager();
+        },
+        "", nullptr, []() { return true; }, this, 2);
     //parent_menu->Insert(1, preference_item);
 #endif
     // Help menu
@@ -3206,6 +3214,12 @@ void MainFrame::init_menubar_as_editor()
         [this](wxCommandEvent &) {
             // Orca: Use GUI_App::open_preferences instead of direct call so windows associations are updated on exit
             wxGetApp().open_preferences();
+        },
+        "", nullptr, []() { return true; }, this);
+    append_menu_item(
+        m_topbar->GetTopMenu(), wxID_ANY, _L("Plugin Manager"), "",
+        [this](wxCommandEvent &) {
+            wxGetApp().open_plugin_manager();
         },
         "", nullptr, []() { return true; }, this);
     //m_topbar->AddDropDownMenuItem(preference_item);
@@ -3433,6 +3447,19 @@ void MainFrame::init_menubar_as_editor()
         [this]() {return m_plater->is_view3D_shown();; }, this);
 
     m_menubar->Append(calib_menu,wxString::Format("&%s", _L("Calibration")));
+    
+    // Plugins menu - dynamically populated by plugins
+    m_plugin_menu = new wxMenu();
+    rebuild_plugin_menu();
+    m_menubar->Append(m_plugin_menu, wxString::Format("&%s", _L("Plugins")));
+    
+    // Register callback to rebuild menu when plugins register/unregister menu items
+    Plugin::plugin_host().set_menu_changed_callback([this]() {
+        wxGetApp().CallAfter([this]() {
+            rebuild_plugin_menu();
+        });
+    });
+    
     if (helpMenu)
         m_menubar->Append(helpMenu, wxString::Format("&%s", _L("Help")));
     SetMenuBar(m_menubar);
@@ -3454,6 +3481,105 @@ void MainFrame::init_menubar_as_editor()
         }, wxID_EXIT);
     }
 #endif // __APPLE__
+}
+
+void MainFrame::rebuild_plugin_menu()
+{
+    if (!m_plugin_menu) return;
+    
+    // Clear existing items
+    while (m_plugin_menu->GetMenuItemCount() > 0) {
+        m_plugin_menu->Delete(m_plugin_menu->FindItemByPosition(0));
+    }
+    
+    // Always add Plugin Manager item at the top
+    append_menu_item(m_plugin_menu, wxID_ANY, _L("Manage Plugins..."), _L("Open the plugin manager"),
+        [this](wxCommandEvent&) {
+            PluginManagerDialog dlg(this);
+            dlg.ShowModal();
+        });
+    
+    // Get all plugin menu registrations
+    auto& host = Plugin::plugin_host();
+    auto registrations = host.get_all_menu_registrations();
+    
+    if (registrations.empty())
+        return;
+    
+    m_plugin_menu->AppendSeparator();
+    
+    // Process each plugin's registrations
+    for (const auto& reg : registrations) {
+        // Get plugin info for name
+        auto plugin_info = host.get_plugin(reg.plugin_id);
+        std::string plugin_name = plugin_info ? plugin_info->manifest.name : reg.plugin_id;
+        
+        // If plugin has submenus, create them first
+        std::map<std::string, wxMenu*> submenus;
+        for (const auto& sm : reg.submenus) {
+            wxMenu* submenu = new wxMenu();
+            submenus[sm.id] = submenu;
+        }
+        
+        // Sort items by order
+        std::vector<Plugin::MenuItemInfo> sorted_items = reg.items;
+        std::sort(sorted_items.begin(), sorted_items.end(), 
+            [](const Plugin::MenuItemInfo& a, const Plugin::MenuItemInfo& b) {
+                return a.order < b.order;
+            });
+        
+        // Add items
+        for (const auto& item : sorted_items) {
+            // Determine target menu
+            wxMenu* target = m_plugin_menu;
+            if (!item.submenu_id.empty() && submenus.count(item.submenu_id)) {
+                target = submenus[item.submenu_id];
+            }
+            
+            // Handle separator
+            if (Plugin::has_flag(item.flags, Plugin::MenuItemFlags::Separator)) {
+                target->AppendSeparator();
+                continue;
+            }
+            
+            // Create menu item
+            wxWindowID id = wxNewId();
+            wxString label = wxString::FromUTF8(item.label);
+            if (!item.shortcut.empty()) {
+                label += "\t" + wxString::FromUTF8(item.shortcut);
+            }
+            
+            wxMenuItem* menu_item;
+            if (Plugin::has_flag(item.flags, Plugin::MenuItemFlags::Checkable)) {
+                menu_item = target->AppendCheckItem(id, label, wxString::FromUTF8(item.tooltip));
+                menu_item->Check(Plugin::has_flag(item.flags, Plugin::MenuItemFlags::Checked));
+            } else {
+                menu_item = target->Append(id, label, wxString::FromUTF8(item.tooltip));
+            }
+            
+            if (Plugin::has_flag(item.flags, Plugin::MenuItemFlags::Disabled)) {
+                menu_item->Enable(false);
+            }
+            
+            // Bind click handler
+            std::string plugin_id = reg.plugin_id;
+            std::string item_id = item.id;
+            target->Bind(wxEVT_MENU, [plugin_id, item_id](wxCommandEvent&) {
+                Plugin::plugin_host().handle_menu_click(plugin_id, item_id);
+            }, id);
+        }
+        
+        // Add submenus to appropriate locations
+        // For now, add all submenus under the plugin's own section
+        if (!submenus.empty()) {
+            // Find the submenu info and add
+            for (const auto& sm : reg.submenus) {
+                if (submenus.count(sm.id)) {
+                    m_plugin_menu->AppendSubMenu(submenus[sm.id], wxString::FromUTF8(sm.label));
+                }
+            }
+        }
+    }
 }
 
 void MainFrame::set_max_recent_count(int max)

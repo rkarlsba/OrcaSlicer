@@ -570,6 +570,7 @@ public:
     bool            is_localized() const { return m_wxLocale->GetLocale() != "English"; }
 
     void            open_preferences(size_t open_on_tab = 0, const std::string& highlight_option = std::string());
+    void            open_plugin_manager();
 
     virtual bool OnExceptionInMainLoop() override;
     // Calls wxLaunchDefaultBrowser if user confirms in dialog.

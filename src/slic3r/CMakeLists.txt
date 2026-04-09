@@ -56,6 +56,8 @@ set(SLIC3R_GUI_SOURCES
     GUI/BitmapComboBox.hpp
     GUI/BonjourDialog.cpp
     GUI/BonjourDialog.hpp
+    GUI/BumpMeshDialog.cpp
+    GUI/BumpMeshDialog.hpp
     GUI/calib_dlg.cpp
     GUI/calib_dlg.hpp
     GUI/Calibration.cpp
@@ -373,6 +375,8 @@ set(SLIC3R_GUI_SOURCES
     GUI/PlateSettingsDialog.hpp
     GUI/Preferences.cpp
     GUI/Preferences.hpp
+    GUI/PluginManagerDialog.cpp
+    GUI/PluginManagerDialog.hpp
     GUI/PresetComboBoxes.cpp
     GUI/PresetComboBoxes.hpp
     GUI/PresetHints.cpp
@@ -651,6 +655,11 @@ set(SLIC3R_GUI_SOURCES
     Utils/FileTransferUtils.hpp
 )
 
+# Plugin context implementation needs wxWidgets, so it's built here
+set(PLUGIN_GUI_SOURCES
+    ../libslic3r/Plugin/PluginContext.cpp
+)
+
 add_subdirectory(GUI/DeviceCore)
 add_subdirectory(GUI/DeviceTab)
 
@@ -710,13 +719,14 @@ configure_file(${CMAKE_CURRENT_SOURCE_DIR}/GeneratedConfig.hpp.in
 if (WIN32)
     add_library(libslic3r_gui STATIC
         ${SLIC3R_GUI_SOURCES}
+        ${PLUGIN_GUI_SOURCES}
         ../dev-utils/BaseException.cpp
         ../dev-utils/BaseException.h
         ../dev-utils/StackWalker.cpp
         ../dev-utils/StackWalker.h
     )
 else ()
-    add_library(libslic3r_gui STATIC ${SLIC3R_GUI_SOURCES})
+    add_library(libslic3r_gui STATIC ${SLIC3R_GUI_SOURCES} ${PLUGIN_GUI_SOURCES})
 endif ()
 target_include_directories(libslic3r_gui PRIVATE Utils ${CMAKE_CURRENT_BINARY_DIR})
 

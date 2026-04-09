@@ -289,6 +289,8 @@ set(lisbslic3r_sources
     Measure.cpp
     Measure.hpp
     MeasureUtils.hpp
+    MeshDisplacement.cpp
+    MeshDisplacement.hpp
     MeshSplitImpl.hpp
     MinAreaBoundingBox.cpp
     MinAreaBoundingBox.hpp
@@ -473,6 +475,16 @@ set(lisbslic3r_sources
     GCode/ToolOrderUtils.cpp
     FlushVolPredictor.hpp
     FlushVolPredictor.cpp
+    Plugin/PluginAPI.hpp
+    Plugin/PluginHost.hpp
+    Plugin/PluginHost.cpp
+    Plugin/PluginContext.hpp
+    # Note: PluginContext.cpp is built in slic3r/CMakeLists.txt (needs wxWidgets)
+    Plugin/PluginIPC.hpp
+    Plugin/NodePluginRuntime.hpp
+    Plugin/NodePluginRuntime.cpp
+    Plugin/NativePluginRuntime.hpp
+    Plugin/PythonPluginRuntime.hpp
 )
 
 if (APPLE)
