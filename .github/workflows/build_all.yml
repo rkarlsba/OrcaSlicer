@@ -5,6 +5,7 @@ on:
     branches:
      - main
      - release/*
+     - fork/config
     paths:
      - 'deps/**'
      - 'src/**'
@@ -19,6 +20,7 @@ on:
     branches:
      - main
      - release/*
+     - fork/config
     paths:
      - 'deps/**'
      - 'deps_src/**'
@@ -223,7 +225,7 @@ jobs:
         name: OrcaSlicer-Linux-flatpak_${{ env.ver }}_${{ matrix.variant.arch }}.flatpak
         path: '/__w/OrcaSlicer/OrcaSlicer/OrcaSlicer-Linux-flatpak_${{ env.ver }}_${{ matrix.variant.arch }}.flatpak'
     - name: Deploy Flatpak to nightly release
-      if: github.repository == 'rkarlsba/OrcaSlicer' && github.ref == 'refs/heads/main'
+      if: github.repository == 'rkarlsba/OrcaSlicer' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/fork/config')
       uses: WebFreak001/deploy-nightly@v3.2.0
       with:
         upload_url: https://uploads.github.com/repos/rkarlsba/OrcaSlicer/releases/306800568/assets{?name,label}
